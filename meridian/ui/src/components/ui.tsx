@@ -27,6 +27,13 @@ const PATHS: Record<string, string> = {
   family: "M7 9a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM17 9a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM2 20c0-3 2-6 5-6 1.2 0 2 .3 3 1M22 20c0-3-2-6-5-6-1.2 0-2 .3-3 1M8.5 20c0-2 1.5-3.5 3.5-3.5s3.5 1.5 3.5 3.5",
   history: "M3 12a9 9 0 1 0 3-6.7M3 4v5h5M12 7v5l3 3",
   info: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 11v6M12 7.5v.5",
+  sliders: "M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1M15 4v4M9 10v4M17 16v4",
+  upload: "M12 15V4M7 9l5-5 5 5M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4",
+  download: "M12 4v11M7 10l5 5 5-5M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4",
+  help: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6M12 17v.5",
+  close: "M6 6l12 12M18 6 6 18",
+  compare: "M4 20V10M10 20V4M16 20v-7M22 20H2",
+  file: "M6 3h8l4 4v14H6zM14 3v4h4M9 12h6M9 16h6",
 };
 
 export function Icon({ name, size = 18 }: { name: string; size?: number }) {
@@ -90,6 +97,29 @@ export function Segmented<T extends string | number>({ value, options, onChange,
 
 export function Empty({ icon = "info", title, children }: { icon?: string; title: string; children?: ReactNode }) {
   return <div className="empty"><span className="faint"><Icon name={icon} size={28} /></span><h3>{title}</h3>{children}</div>;
+}
+
+/** A dialog over the page. Escape or the close button calls onClose. */
+export function Modal({ title, children, onClose, width = 760, footer }:
+  { title: string; children: ReactNode; onClose: () => void; width?: number; footer?: ReactNode }) {
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const prev = document.activeElement as HTMLElement | null;
+    box.current?.focus();
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", key);
+    return () => { window.removeEventListener("keydown", key); prev?.focus?.(); };
+  }, [onClose]);
+  return (
+    <div className="modal-back" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal card" role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} ref={box} style={{ width }}>
+        <div className="card-head"><h2>{title}</h2>
+          <button className="icon-btn" onClick={onClose} aria-label="Close"><Icon name="close" /></button></div>
+        <div className="modal-body">{children}</div>
+        {footer && <div className="modal-foot">{footer}</div>}
+      </div>
+    </div>
+  );
 }
 
 export function ErrorNote({ error }: { error: string }) {

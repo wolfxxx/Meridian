@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, ModelSummary } from "./api";
+import { Tour, Welcome } from "./components/Tour";
 import { Icon, Logo, useAsync } from "./components/ui";
 import { ModelPage } from "./pages/ModelPage";
 import { Workspace } from "./pages/Workspace";
@@ -7,21 +8,28 @@ import { go, useRoute } from "./router";
 
 export const MODEL_ICON: Record<string, string> = { term: "term", savings: "savings", funeral: "family" };
 
-function useTheme(): [string, () => void] {
+// The theme is kept in the user's settings file: the app's address (port) changes on every
+// start, so browser storage would forget it.
+function useTheme(saved: string | null | undefined): [string, () => void] {
   const [theme, setTheme] = useState<string>(() => {
-    try { return localStorage.getItem("meridian-theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"); }
-    catch { return "light"; }
+    try { return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"; } catch { return "light"; }
   });
-  useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
-    try { localStorage.setItem("meridian-theme", theme); } catch { /* private mode */ }
-  }, [theme]);
-  return [theme, () => setTheme((t) => (t === "dark" ? "light" : "dark"))];
+  useEffect(() => { if (saved) setTheme(saved); }, [saved]);
+  useEffect(() => { document.documentElement.setAttribute("data-theme", theme); }, [theme]);
+  return [theme, () => setTheme((t) => {
+    const next = t === "dark" ? "light" : "dark";
+    api.saveSettings({ theme: next }).catch(() => undefined);
+    return next;
+  })];
 }
 
 export default function App() {
   const route = useRoute();
-  const [theme, toggle] = useTheme();
+  const [settings] = useAsync(() => api.settings(), []);
+  const [theme, toggle] = useTheme(settings?.theme);
+  const [tour, setTour] = useState<"off" | "welcome" | "on">("off");
+  useEffect(() => { if (settings && !settings.tour_done) setTour("welcome"); }, [settings]);
+  const endWelcome = (next: "off" | "on") => { setTour(next); api.saveSettings({ tour_done: true }).catch(() => undefined); };
   const [models, err, reload] = useAsync<ModelSummary[]>(() => api.workspace(), []);
   useEffect(() => { reload(); }, [route.model, route.section, reload]);
 
@@ -48,10 +56,15 @@ export default function App() {
           {err && <div className="faint" style={{ padding: 10 }}>Could not reach the Meridian service.</div>}
         </nav>
         <div className="rail-foot">
-          <span className="faint" style={{ fontSize: 12 }}>Prototype · v0.1</span>
+          <span className="faint" style={{ fontSize: 12 }}>Prototype · v0.2</span>
+          <span className="row" style={{ gap: 2 }}>
+          <button className="icon-btn" onClick={() => setTour("on")} title="Take the tour" aria-label="Take the tour" data-tour="help">
+            <Icon name="help" />
+          </button>
           <button className="icon-btn" onClick={toggle} title={theme === "dark" ? "Light theme" : "Dark theme"} aria-label="Switch theme">
             <Icon name={theme === "dark" ? "sun" : "moon"} />
           </button>
+          </span>
         </div>
       </aside>
       <main className="main" id="main">
@@ -59,6 +72,8 @@ export default function App() {
           ? <Workspace models={models} error={err} />
           : <ModelPage key={route.model} modelId={route.model} section={route.section} params={route.params} onChanged={reload} />}
       </main>
+      {tour === "welcome" && <Welcome onTour={() => endWelcome("on")} onSkip={() => endWelcome("off")} />}
+      {tour === "on" && <Tour onEnd={() => setTour("off")} />}
     </div>
   );
 }

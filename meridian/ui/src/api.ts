@@ -4,7 +4,19 @@ export interface Kpi { label: string; value: number; unit: string; note: string;
 export interface ModelSummary {
   id: string; name: string; tagline: string; source: string; policies: number; rows: number; steps: number;
   variables: number; lives: number; modified_tables: string[]; last_run: RunBrief | null;
+  data_source: DataSource | null;
 }
+export interface DataSource { name: string; rows: number; at: number }
+export interface Lever { key: string; label: string; kind: "scale" | "shift"; min: number; max: number; step: number; unit: "%" | "pp"; help: string }
+export interface SchemaField { key: string; label: string; kind: "number" | "integer" | "text"; description: string; choices: string[] | null; min: number | null; max: number | null }
+export interface ImportReport {
+  ok: boolean; fatal?: string; rows?: number; delimiter?: string; headers?: string[];
+  matched?: { key: string; label: string; column: string }[];
+  missing?: { key: string; label: string; description: string }[]; unused?: string[];
+  errors?: { row: number; column: string; value: string; message: string }[];
+  error_count?: number; error_summary?: Record<string, number>; preview?: Record<string, string>[]; applied?: boolean;
+}
+export interface Settings { theme: string | null; tour_done: boolean }
 export interface VariableSpec {
   name: string; formula: string; doc: string; init: number; refs: [string, number][]; inputs: string[];
   used_by: [string, number][]; cls: "C1" | "C2"; total: boolean; pv: boolean; tables: string[];
@@ -15,6 +27,7 @@ export interface RunOption { key: string; label: string; kind: "choice"; choices
 export interface ModelDetail extends ModelSummary {
   description: string; currency: string; variables_spec: VariableSpec[]; tables: TableInfo[];
   data_columns: DataColumn[]; run_options: RunOption[];
+  levers: Lever[]; sensitivities: { levers: Record<string, number> }[]; input_schema: SchemaField[];
 }
 export interface TableDim { kind: "range" | "categories"; start?: number; labels: string[] }
 export interface TableData {
@@ -25,6 +38,7 @@ export interface RunBrief {
   id: string; model: string; label: string; status: "queued" | "running" | "done" | "failed"; progress: number;
   message: string; started: number; finished: number | null; seconds: number | null; error: string | null;
   kpis: Kpi[] | null; modified_tables: string[];
+  levers: Record<string, number>; group: string | null; data: string | null;
 }
 export interface Series { values: number[]; label: string }
 export interface RunResult {
@@ -72,8 +86,13 @@ export const api = {
     req<DataPage>(`/api/models/${id}/data?offset=${offset}&limit=${limit}&search=${encodeURIComponent(search)}`),
   dataStats: (id: string) => req<ColumnStats[]>(`/api/models/${id}/data/stats`),
   explain: (id: string, policy: number) => req<ExplainData>(`/api/models/${id}/explain?policy=${policy}`),
-  startRun: (id: string, options: Record<string, number>, label?: string) =>
-    req<RunBrief>(`/api/models/${id}/runs`, { method: "POST", body: JSON.stringify({ options, label }) }),
+  startRun: (id: string, options: Record<string, any>, label?: string, group?: string) =>
+    req<RunBrief>(`/api/models/${id}/runs`, { method: "POST", body: JSON.stringify({ options, label, group }) }),
+  importData: (id: string, csv: string, name: string, apply = false) =>
+    req<ImportReport>(`/api/models/${id}/data/import`, { method: "POST", body: JSON.stringify({ csv, name, apply }) }),
+  resetData: (id: string) => req<{ ok: boolean }>(`/api/models/${id}/data/reset`, { method: "POST" }),
+  settings: () => req<Settings>("/api/settings"),
+  saveSettings: (s: Partial<Settings>) => req<Settings>("/api/settings", { method: "PUT", body: JSON.stringify(s) }),
   runs: (id: string) => req<RunBrief[]>(`/api/models/${id}/runs`),
   run: (rid: string, full = true) => req<RunFull>(`/api/runs/${rid}?full=${full}`),
   startValidation: (id: string) => req<ValidationState>(`/api/models/${id}/validation`, { method: "POST" }),

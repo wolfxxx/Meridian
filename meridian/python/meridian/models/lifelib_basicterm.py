@@ -193,15 +193,19 @@ class BasicTermResult:
 
 
 def run_basicterm(model_points: dict | None = None, tables: dict | None = None, *,
-                  model: Model | None = None, engine: str = "rust") -> BasicTermResult:
-    """Price (pass 1) then project (pass 2), as lifelib's premium_pp -> projection."""
+                  model: Model | None = None, engine: str = "rust",
+                  pricing_tables: dict | None = None) -> BasicTermResult:
+    """Price (pass 1) then project (pass 2), as lifelib's premium_pp -> projection.
+
+    ``pricing_tables`` prices on a different basis from the projection, e.g. a sensitivity
+    that changes the projection assumptions while premiums stay as charged."""
     mp = dict(model_points if model_points is not None else load_model_points())
     tb = tables if tables is not None else load_tables()
     m = model or build(int(np.max(mp["policy_term"])))
 
     # Pass 1: present values of claims and in-force (premium not needed: set to 0).
     mp["premium_pp"] = np.zeros(len(mp["policy_term"]))
-    pricing = run(m, mp, tb, engine=engine)
+    pricing = run(m, mp, pricing_tables if pricing_tables is not None else tb, engine=engine)
     net = pricing.policy_sums["pv_claims"][0] / pricing.policy_sums["pv_pols_if"][0]
     premium_pp = np.around((1 + LOADING_PREM) * net, 2)  # lifelib BasicTerm_M: np.around(.., 2)
 

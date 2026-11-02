@@ -10,6 +10,7 @@ import { PolicyData } from "./PolicyData";
 import { Runs } from "./Runs";
 import { Validation } from "./Validation";
 import { Variables } from "./Variables";
+import { WhatIf } from "./WhatIf";
 
 export const SECTIONS: [string, string, string][] = [
   ["overview", "Overview", "overview"],
@@ -17,6 +18,7 @@ export const SECTIONS: [string, string, string][] = [
   ["assumptions", "Assumptions", "table"],
   ["data", "Policy data", "people"],
   ["run", "Run & results", "play"],
+  ["whatif", "What-if", "sliders"],
   ["explain", "Explain", "explain"],
   ["validation", "Validation", "shield"],
 ];
@@ -51,6 +53,7 @@ export function ModelPage({ modelId, section, params, onChanged }:
               <h1>{model.name}</h1>
               <Badge tone={model.source.startsWith("lifelib") ? "ref" : ""}>{model.source}</Badge>
               {model.modified_tables.length > 0 && <Badge tone="warn">Edited: {model.modified_tables.join(", ")}</Badge>}
+              {model.data_source && <Badge tone="accent">Your data: {model.data_source.name}</Badge>}
             </div>
             <p className="muted">{model.tagline}</p>
           </div>
@@ -61,7 +64,7 @@ export function ModelPage({ modelId, section, params, onChanged }:
             </button>
           </div>
         </div>
-        <div className="tabs" role="tablist" aria-label="Model sections">
+        <div className="tabs" role="tablist" data-tour="tabs" aria-label="Model sections">
           {SECTIONS.map(([id, label, icon]) => (
             <button key={id} className="tab" role="tab" aria-selected={section === id} onClick={() => go(modelId, id)}>
               <Icon name={icon} size={16} />{label}
@@ -69,11 +72,12 @@ export function ModelPage({ modelId, section, params, onChanged }:
           ))}
         </div>
       </div></header>
-      <div className="page">
+      <div className="page" data-tour="page">
         {section === "overview" && <Overview model={model} />}
         {section === "variables" && <Variables model={model} selected={params.v} />}
         {section === "assumptions" && <Assumptions model={model} selected={params.t} onChanged={refresh} />}
-        {section === "data" && <PolicyData model={model} />}
+        {section === "data" && <PolicyData model={model} onChanged={refresh} />}
+        {section === "whatif" && <WhatIf model={model} />}
         {section === "run" && <Runs model={model} runId={params.run} autorun={params.autorun === "1"} />}
         {section === "explain" && <Explain model={model} params={params} />}
         {section === "validation" && <Validation model={model} />}

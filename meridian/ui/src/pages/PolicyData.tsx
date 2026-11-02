@@ -2,19 +2,23 @@ import { useEffect, useState } from "react";
 import { api, ColumnStats, DataPage, ModelDetail } from "../api";
 import { Histogram } from "../components/charts";
 import { Icon, Spinner, useAsync } from "../components/ui";
-import { compact, num } from "../format";
+import { ago, compact, num } from "../format";
 import { go } from "../router";
+import { ImportDialog } from "./ImportDialog";
 
 const PAGE = 100;
 
-export function PolicyData({ model }: { model: ModelDetail }) {
-  const [stats] = useAsync<ColumnStats[]>(() => api.dataStats(model.id), [model.id]);
+export function PolicyData({ model, onChanged }: { model: ModelDetail; onChanged: () => void }) {
+  const version = model.data_source?.at ?? 0;
+  const [stats] = useAsync<ColumnStats[]>(() => api.dataStats(model.id), [model.id, version]);
+  const [importing, setImporting] = useState(false);
   const [q, setQ] = useState("");
   const [query, setQuery] = useState("");
   const [offset, setOffset] = useState(0);
   const [page, setPage] = useState<DataPage | null>(null);
   useEffect(() => { const id = setTimeout(() => { setQuery(q); setOffset(0); }, 250); return () => clearTimeout(id); }, [q]);
-  useEffect(() => { let on = true; api.data(model.id, offset, PAGE, query).then((p) => on && setPage(p)); return () => { on = false; }; }, [model.id, offset, query]);
+  useEffect(() => { let on = true; api.data(model.id, offset, PAGE, query).then((p) => on && setPage(p)); return () => { on = false; }; }, [model.id, offset, query, version]);
+  async function restore() { await api.resetData(model.id); setOffset(0); onChanged(); }
   const money = model.currency ? model.currency + " " : "";
   const lifeWord = model.lives > 1 ? "lives" : "policies";
 
@@ -27,7 +31,23 @@ export function PolicyData({ model }: { model: ModelDetail }) {
             ? `One row per insured life, as an administration system holds it. Meridian groups the lives of each policy (up to ${model.lives}) when it runs.`
             : "One row per model point, read straight from the data file."}</p>
         </div>
+        <div className="row" data-tour="import">
+          <a className="btn" href={`/api/models/${model.id}/data/template.csv`} download><Icon name="file" size={15} /> Template</a>
+          <a className="btn" href={`/api/models/${model.id}/data/export.csv`} download><Icon name="download" size={15} /> Export CSV</a>
+          <button className="btn primary" onClick={() => setImporting(true)}><Icon name="upload" size={15} /> Import your data</button>
+        </div>
       </div>
+      {model.data_source && (
+        <div className="callout info">
+          <Icon name="file" />
+          <div className="spread" style={{ flex: 1 }}>
+            <span>Using <strong>your data</strong> from <span className="mono">{model.data_source.name}</span> · {num(model.data_source.rows, 0)} rows · loaded {ago(model.data_source.at)}.
+              Runs use it until you restore the original data or close Meridian.</span>
+            <button className="btn small" onClick={restore}><Icon name="reset" size={14} /> Restore original data</button>
+          </div>
+        </div>
+      )}
+      {importing && <ImportDialog model={model} onClose={() => setImporting(false)} onDone={() => { setImporting(false); setOffset(0); onChanged(); }} />}
       <div className="grid cols-4">
         {(stats || []).filter((s) => s.key !== model.data_columns[0].key).slice(0, 8).map((s) => (
           <div key={s.key} className="card card-body stack" style={{ gap: 6 }}>
@@ -66,7 +86,7 @@ export function PolicyData({ model }: { model: ModelDetail }) {
             <div className="tbl-wrap" style={{ maxHeight: 520 }}>
               <table className="tbl">
                 <thead><tr>
-                  {model.data_columns.map((c) => <th key={c.key} className={c.kind === "money" || c.kind === undefined ? "r" : ""}>{c.label}</th>)}
+                  {model.data_columns.map((c) => <th key={c.key} className={c.kind !== "id" && typeof page.rows[0]?.[c.key] !== "string" ? "r" : ""}>{c.label}</th>)}
                   <th />
                 </tr></thead>
                 <tbody>

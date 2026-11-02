@@ -23,6 +23,7 @@ from ..models import lifelib_basicterm as bt
 from ..models import lifelib_cashvalue as cv
 from ..models import sa_funeral as fu
 from ..tables import Table
+from .dataio import Field, check_csv, funeral_group_check, to_csv
 
 VALIDATION = Path(__file__).resolve().parents[1] / "validation_data"
 
@@ -123,6 +124,24 @@ def kpi(label, value, unit="", note="", fmt="number"):
     return {"label": label, "value": value, "unit": unit, "note": note, "format": fmt}
 
 
+def lever(key, label, kind, tables, lo, hi, step, help="", probability=False):
+    """A what-if slider. ``scale`` levers multiply the tables by (1 + value/100); ``shift``
+    levers add value/100 (percentage points). Probabilities stay within 0..1 and a rate of 1
+    (certain death at the end of a table) stays 1."""
+    return {"key": key, "label": label, "kind": kind, "tables": tables, "min": lo, "max": hi, "step": step,
+            "unit": "%" if kind == "scale" else "pp", "help": help, "probability": probability}
+
+
+def lever_text(lv: dict, v: float) -> str:
+    sign = "+" if v > 0 else "\u2212"
+    return f"{lv['label']} {sign}{abs(v):g}{'%' if lv['unit'] == '%' else ' pp'}"
+
+
+def pairs(key, up, down=None):
+    down = -up if down is None else down
+    return [{"levers": {key: up}}, {"levers": {key: down}}]
+
+
 # ---- the entries ------------------------------------------------------------------------------
 
 @dataclass
@@ -136,8 +155,12 @@ class ModelEntry:
     table_info: dict[str, dict]       # name -> {"description", "editable"}
     data_columns: list[dict]          # columns shown in the policy grid
     run_options: list[dict]           # options shown before a run
+    levers: list[dict] = field(default_factory=list)          # what-if sliders
+    sensitivities: list[dict] = field(default_factory=list)   # standard set: [{"levers": {...}}]
+    schema: list[Field] = field(default_factory=list)         # columns a policy-data CSV needs
     _model: Model | None = None
     _data: dict | None = None
+    data_source: dict | None = None   # None = the model's own data; else {"name", "rows", "at"}
     overrides: dict[str, Table] = field(default_factory=dict)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -166,13 +189,84 @@ class ModelEntry:
     def tables(self) -> dict[str, Table]:
         return {**self.base_tables(), **self.overrides}
 
+    # ---- what-if levers --------------------------------------------------------------------
+    def lever_values(self, options: dict | None) -> dict[str, float]:
+        vals = (options or {}).get("levers") or {}
+        unknown = set(vals) - {lv["key"] for lv in self.levers}
+        if unknown:
+            raise ValueError(f"unknown what-if setting: {', '.join(sorted(unknown))}")
+        out = {}
+        for lv in self.levers:
+            v = float(vals.get(lv["key"], 0) or 0)
+            if not lv["min"] <= v <= lv["max"]:
+                raise ValueError(f"{lv['label']} must be between {lv['min']:g} and {lv['max']:g}")
+            if v:
+                out[lv["key"]] = v
+        return out
+
+    def lever_label(self, options: dict | None) -> str:
+        vals = self.lever_values(options)
+        return ", ".join(lever_text(lv, vals[lv["key"]]) for lv in self.levers if lv["key"] in vals)
+
+    def run_overrides(self, options: dict | None) -> dict[str, Table]:
+        """The user's edited tables, with the run's what-if levers applied on top."""
+        ov = dict(self.overrides)
+        vals = self.lever_values(options)
+        base = self.tables()
+        for lv in self.levers:
+            v = vals.get(lv["key"])
+            if not v:
+                continue
+            for name in lv["tables"]:
+                t = ov.get(name, base[name])
+                if lv["kind"] == "scale":
+                    arr = t.values * (1 + v / 100)
+                    if lv["probability"]:
+                        arr = np.where(t.values >= 1, 1.0, np.clip(arr, 0.0, 1.0))
+                else:
+                    arr = t.values + v / 100
+                nt = Table(arr)
+                nt.dims, nt.fill = t.dims, t.fill
+                ov[name] = nt
+        return ov
+
+    # ---- policy data -----------------------------------------------------------------------
+    def group_check(self, columns: dict) -> list[tuple]:
+        return []
+
+    def check_import(self, text: str) -> dict:
+        return check_csv(text, self.schema, self.group_check)
+
+    def set_rows(self, columns: dict, name: str):
+        with self.lock:
+            self._data = columns
+            self._model = None
+            self._clear_cache()
+            self.data_source = {"name": name, "rows": int(len(next(iter(columns.values())))), "at": time.time()}
+
+    def reset_data(self):
+        with self.lock:
+            self._data = None
+            self._model = None
+            self._clear_cache()
+            self.data_source = None
+
+    def _clear_cache(self):
+        pass
+
+    def export_csv(self) -> str:
+        return to_csv(self.rows, self.schema)
+
+    def template_csv(self) -> str:
+        return to_csv(self.load_rows(), self.schema, limit=5)
+
     def summary(self) -> dict:
         rows = self.rows
         first = next(iter(rows.values()))
         return {"id": self.id, "name": self.name, "tagline": self.tagline, "source": self.source,
                 "policies": self.n_policies(), "rows": int(len(first)), "steps": self.model.n_steps,
                 "variables": len(self.model.variables), "lives": self.model.lives,
-                "modified_tables": sorted(self.overrides)}
+                "modified_tables": sorted(self.overrides), "data_source": self.data_source}
 
     def n_policies(self) -> int:
         return int(len(next(iter(self.rows.values()))))
@@ -184,7 +278,10 @@ class ModelEntry:
                                   "editable": self.table_info.get(n, {}).get("editable", False),
                                   "shape": list(t.values.shape), "modified": n in self.overrides}
                                  for n, t in self.tables().items()],
-                      "data_columns": self.data_columns, "run_options": self.run_options})
+                      "data_columns": self.data_columns, "run_options": self.run_options,
+                      "levers": [{k: v for k, v in lv.items() if k != "tables"} for lv in self.levers],
+                      "sensitivities": self.sensitivities,
+                      "input_schema": [f.as_dict() for f in self.schema]})
 
     def table(self, name: str) -> dict:
         t = self.tables()[name]
@@ -268,7 +365,12 @@ def _trace_payload(tr, steps: int, label: str, extra: dict | None = None) -> dic
 
 class TermEntry(ModelEntry):
     def build(self):
-        return bt.build(20)
+        return bt.build(max(20, int(np.max(self.rows["policy_term"]))))
+
+    def group_check(self, columns):
+        bad = np.where(columns["age_at_entry"] + columns["policy_term"] > 120)[0]
+        return [(int(i) + 2, "Term (years)", str(int(columns["policy_term"][i])),
+                 "takes the policy past age 120, the end of the mortality table") for i in bad[:50]]
 
     def load_rows(self):
         return bt.load_model_points()
@@ -278,11 +380,14 @@ class TermEntry(ModelEntry):
 
     def policy_label(self, rows, i):
         return (f"Policy {int(rows['point_id'][i])} · {rows['sex'][i]}, age {int(rows['age_at_entry'][i])} · "
-                f"{int(rows['policy_term'][i])}-year term · SA {int(rows['sum_assured'][i]):,}")
+                f"{int(rows['policy_term'][i])}-year term · SA {int(rows['sum_assured'][i]):,}".replace(",", " "))
 
     def run(self, options, progress):
         progress(0.1, "Pricing pass")
-        res = bt.run_basicterm(self.rows, self.tables())
+        tables = {**self.base_tables(), **self.run_overrides(options)}
+        # What-if levers change the projection only: premiums stay as priced on the model's basis.
+        pricing = self.tables() if self.lever_values(options) else None
+        res = bt.run_basicterm(self.rows, tables, pricing_tables=pricing)
         progress(0.9, "Collecting results")
         p = res.projection
         ps = {k: float(v.sum()) for k, v in p.policy_sums.items()}
@@ -311,13 +416,13 @@ class TermEntry(ModelEntry):
         return _trace_payload(tr, self.model.n_steps, self.policy_label(rows, policy))
 
     def validate(self):
-        res = bt.run_basicterm(self.rows, bt.load_tables())
+        res = bt.run_basicterm(bt.load_model_points(), bt.load_tables())
         ref = read_csv_columns(VALIDATION / "lifelib_basicterm" / "lifelib_M_per_policy.csv")
         cf = read_csv_columns(VALIDATION / "lifelib_basicterm" / "lifelib_M_cashflows.csv")
         meta = json.loads((VALIDATION / "lifelib_basicterm" / "meta.json").read_text())
         p = res.projection
         checks = [{"name": "Premium per policy", "detail": "rounded to the cent, all 10,000 policies",
-                   "metric": f"{int(np.sum(res.premium_pp == ref['premium_pp'])):,} of {len(ref['premium_pp']):,} identical",
+                   "metric": f"{int(np.sum(res.premium_pp == ref['premium_pp'])):,} of {len(ref['premium_pp']):,} identical".replace(",", " "),
                    "passed": bool(np.array_equal(res.premium_pp, ref["premium_pp"]))}]
         for k, lab in [("pv_premiums", "PV of premiums"), ("pv_claims", "PV of claims"), ("pv_expenses", "PV of expenses"),
                        ("pv_commissions", "PV of commissions"), ("pv_net_cf", "PV of net cash flow")]:
@@ -349,6 +454,22 @@ class SavingsEntry(ModelEntry):
     def load_rows(self):
         return cv.load_model_points()
 
+    def group_check(self, columns):
+        t = cv.load_tables()
+        wl = dict(zip(t["is_wl"].dims[0][1], t["is_wl"].values))
+        last = cv.mort_table_last_age(t)
+        out = []
+        for i, (s, age, term, dur) in enumerate(zip(columns["spec_id"], columns["age_at_entry"],
+                                                     columns["policy_term"], columns["duration_mth"])):
+            end = last if wl[s] == 1 else age + term
+            if wl[s] != 1 and age + term > last:
+                out.append((i + 2, "Term (years)", str(int(term)), f"takes the policy past age {last}"))
+            elif dur >= 12 * (end - age):
+                out.append((i + 2, "Duration (months)", str(int(dur)), "is beyond the end of the policy"))
+            if len(out) >= 50:
+                break
+        return out
+
     def base_tables(self):
         return cv.load_tables()
 
@@ -361,7 +482,8 @@ class SavingsEntry(ModelEntry):
     def run(self, options, progress):
         n = int(options.get("scenarios") or 0)
         progress(0.1, f"Projecting {'lifelib’s 10' if not n else n} scenarios")
-        res = cv.run_cashvalue(self.rows, tables=self.overrides or None, generated_scenarios=n or None)
+        res = cv.run_cashvalue(self.rows, tables=self.run_overrides(options) or None,
+                               generated_scenarios=n or None)
         progress(0.9, "Collecting results")
         pv = res.policy_sums["pv_net_cf"].sum(axis=1)
         srt = np.sort(pv)
@@ -450,6 +572,13 @@ class FuneralEntry(ModelEntry):
     def n_policies(self):
         return int(len(self.rows["policy_id"]))  # rows = lives
 
+    def _clear_cache(self):
+        self._lanes = None
+        self._pids = None
+
+    def group_check(self, columns):
+        return funeral_group_check(columns)
+
     def summary(self):
         s = super().summary()
         s["policies"] = len(set(self.rows["policy_id"]))
@@ -458,10 +587,10 @@ class FuneralEntry(ModelEntry):
 
     def policy_label(self, rows, i):
         return (f"{rows['policy_id'][i]} · {rows['role'][i]} · {rows['sex'][i]}, age {int(rows['age'][i])} · "
-                f"cover R{int(rows['cover'][i]):,}")
+                f"cover R {int(rows['cover'][i]):,}".replace(",", " "))
 
     def run(self, options, progress):
-        overrides = {k: v for k, v in self.overrides.items() if k != "basis"}
+        overrides = {k: v for k, v in self.run_overrides(options).items() if k != "basis"}
 
         def step(done, total, name):
             progress(0.05 + 0.9 * done / total, f"Basis {done} of {total}: {name.replace('_', ' ')}")
@@ -491,7 +620,8 @@ class FuneralEntry(ModelEntry):
         # `policy` is a row (life) index in the admin data; find its policy and slot.
         rows = self.rows
         pid = rows["policy_id"][policy]
-        p = self._pids.index(pid) if getattr(self, "_pids", None) else list(dict.fromkeys(rows["policy_id"])).index(pid)
+        _ = self.lanes
+        p = self._pids.index(pid)
         members = np.where(rows["policy_id"] == pid)[0]
         slot = int(np.where(members == policy)[0][0])
         _ = self.lanes
@@ -540,6 +670,20 @@ def make_catalog() -> dict[str, ModelEntry]:
                           {"key": "age_at_entry", "label": "Age at entry"}, {"key": "policy_term", "label": "Term (years)"},
                           {"key": "sum_assured", "label": "Sum assured", "kind": "money"}],
             run_options=[],
+            levers=[lever("mortality", "Mortality", "scale", ["mort_table"], -50, 100, 5, "Every mortality rate, up or down", probability=True),
+                    lever("interest", "Discount rate", "shift", ["disc_rate_ann"], -2, 2, 0.25, "Parallel shift of the discount curve")],
+            sensitivities=pairs("mortality", 10) + pairs("interest", 1),
+            schema=[Field("point_id", "Policy", "integer", "Policy or model-point number", min=1,
+                          aliases=["policy_id", "policy", "policy_no", "policy_number", "id"]),
+                    Field("sex", "Sex", "text", "M or F", choices=["M", "F"], aliases=["gender"]),
+                    Field("age_at_entry", "Age at entry", "integer", "Age when the policy started", min=18, max=100,
+                          aliases=["age", "entry_age"]),
+                    Field("policy_term", "Term (years)", "integer", "Policy term in years", min=1, max=60,
+                          aliases=["term"]),
+                    Field("policy_count", "Policies", "number", "Number of policies this row stands for", min=0,
+                          aliases=["count", "number_of_policies"]),
+                    Field("sum_assured", "Sum assured", "number", "Death benefit", min=0,
+                          aliases=["sa", "cover", "benefit"])],
         ),
         SavingsEntry(
             id="savings", name="Savings with account value",
@@ -562,6 +706,30 @@ def make_catalog() -> dict[str, ModelEntry]:
                           {"key": "premium_pp", "label": "Premium", "kind": "money"}],
             run_options=[{"key": "scenarios", "label": "Scenarios", "kind": "choice",
                           "choices": [[0, "lifelib’s 10 scenarios"], [100, "100 generated"], [500, "500 generated"]], "default": 0}],
+            levers=[lever("mortality", "Mortality", "scale", ["mort_table"], -50, 100, 5, "Every mortality rate, up or down", probability=True),
+                    lever("interest", "Discount rate", "shift", ["disc_rate_ann"], -2, 2, 0.25, "Parallel shift of the discount curve"),
+                    lever("surrender", "Surrender charges", "scale", ["surr_charge"], -100, 100, 10, "Every surrender charge rate"),
+                    lever("loading", "Premium loading", "scale", ["load_prem_rate"], -100, 100, 10, "Premium loading by product")],
+            sensitivities=pairs("mortality", 10) + pairs("interest", 1) + pairs("surrender", 50),
+            schema=[Field("policy_id", "Policy", "integer", "Policy or model-point number", min=1,
+                          aliases=["policy", "policy_no", "policy_number", "id", "point_id"]),
+                    Field("spec_id", "Product", "text", "Product code A, B, C or D", choices=["A", "B", "C", "D"],
+                          aliases=["product", "product_code", "spec"]),
+                    Field("age_at_entry", "Age at entry", "integer", "Age when the policy started", min=18, max=100,
+                          aliases=["age", "entry_age"]),
+                    Field("sex", "Sex", "text", "M or F", choices=["M", "F"], aliases=["gender"]),
+                    Field("policy_term", "Term (years)", "integer", "Policy term; ignored for whole-life products",
+                          min=1, max=9999, aliases=["term"]),
+                    Field("policy_count", "Policies", "number", "Number of policies this row stands for", min=0,
+                          aliases=["count", "number_of_policies"]),
+                    Field("sum_assured", "Sum assured", "number", "Death benefit", min=0,
+                          aliases=["sa", "cover", "benefit"]),
+                    Field("duration_mth", "Duration (months)", "integer", "Months in force at the valuation date",
+                          min=0, aliases=["duration", "months_in_force"]),
+                    Field("premium_pp", "Premium", "number", "Premium per policy (single or monthly, by product)",
+                          min=0, aliases=["premium"]),
+                    Field("av_pp_init", "Account value", "number", "Account value per policy at the valuation date",
+                          min=0, aliases=["av", "account_value", "fund_value"])],
         ),
         FuneralEntry(
             id="funeral", name="Family funeral (SAM)",
@@ -581,6 +749,22 @@ def make_catalog() -> dict[str, ModelEntry]:
                           {"key": "cover", "label": "Cover", "kind": "money"}, {"key": "premium", "label": "Premium", "kind": "money"},
                           {"key": "duration_mth", "label": "Duration (months)"}],
             run_options=[],
+            levers=[lever("mortality", "Mortality", "scale", ["mortality"], -50, 100, 5, "Every mortality rate, up or down", probability=True),
+                    lever("lapse", "Lapses", "scale", ["lapse"], -50, 100, 5, "Every lapse rate", probability=True),
+                    lever("interest", "Interest rates", "shift", ["spot"], -2, 2, 0.25, "Parallel shift of the risk-free curve")],
+            sensitivities=pairs("mortality", 10) + pairs("lapse", 25) + pairs("interest", 1),
+            schema=[Field("policy_id", "Policy", "text", "Policy number; lives of one policy share it",
+                          aliases=["policy", "policy_no", "policy_number"]),
+                    Field("role", "Role", "text", "main, spouse, child or extended",
+                          choices=["main", "spouse", "child", "extended"], aliases=["relationship", "member_type", "life_type"]),
+                    Field("sex", "Sex", "text", "M or F", choices=["M", "F"], aliases=["gender"]),
+                    Field("age", "Age", "integer", "Age at the valuation date", min=0, max=120, aliases=["age_now"]),
+                    Field("cover", "Cover", "number", "Funeral benefit for this life", min=0,
+                          aliases=["sum_assured", "benefit", "sa"]),
+                    Field("premium", "Premium", "number", "Monthly premium for this life", min=0,
+                          aliases=["monthly_premium"]),
+                    Field("duration_mth", "Duration (months)", "integer", "Months since the policy started", min=0,
+                          aliases=["duration", "months_in_force"])],
         ),
     ]
     return {e.id: e for e in entries}

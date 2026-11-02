@@ -5,6 +5,8 @@ model and every validation through the same API the window uses, and fail on any
 """
 
 import json
+import os
+import tempfile
 import socket
 import subprocess
 import sys
@@ -34,7 +36,8 @@ def main(exe):
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
     base = f"http://127.0.0.1:{port}"
-    proc = subprocess.Popen([exe, "--headless", "--port", str(port)])
+    home = tempfile.mkdtemp(prefix="meridian-check-")
+    proc = subprocess.Popen([exe, "--headless", "--port", str(port)], env={**os.environ, "MERIDIAN_HOME": home})
     failures = 0
     try:
         for _ in range(240):
@@ -61,6 +64,30 @@ def main(exe):
             passed = bool(checks) and all(c["passed"] for c in checks)
             failures += not passed
             print(f"  validation {mid:<10} {'passed' if passed else 'FAILED'} ({len(checks)} checks) {v.get('error') or ''}")
+            lever = call(f"{base}/api/models/{mid}")["levers"][0]
+            run = call(f"{base}/api/models/{mid}/runs", "POST", {"options": {"levers": {lever["key"]: lever["step"]}}})
+            w = wait_for(lambda: call(f"{base}/api/runs/{run['id']}"))
+            ok = w["status"] == "done" and w["kpis"] != r["kpis"]
+            failures += not ok
+            print(f"  what-if    {mid:<10} {'done' if ok else 'FAILED'}  {w['label']}")
+
+        # policy data: export, import a slice back, run on it, restore
+        text = urllib.request.urlopen(base + "/api/models/funeral/data/export.csv", timeout=60).read().decode()
+        lines = text.splitlines()
+        cut = next(i for i in range(400, len(lines)) if lines[i].split(",")[0] != lines[i - 1].split(",")[0])
+        rep = call(base + "/api/models/funeral/data/import", "POST",
+                   {"csv": "\n".join(lines[:cut]), "name": "check.csv", "apply": True})
+        run = call(f"{base}/api/models/funeral/runs", "POST", {"options": {}})
+        r = wait_for(lambda: call(f"{base}/api/runs/{run['id']}"))
+        call(base + "/api/models/funeral/data/reset", "POST")
+        ok = rep.get("applied") and r["status"] == "done" and r["data"] == "check.csv"
+        failures += not ok
+        print(f"  import     funeral    {'done' if ok else 'FAILED'}  {cut - 1} lives imported and run")
+
+        s1 = call(base + "/api/settings", "PUT", {"tour_done": True})
+        ok = s1["tour_done"] is True and os.path.exists(os.path.join(home, "settings.json"))
+        failures += not ok
+        print(f"  settings   {'saved' if ok else 'FAILED'}")
     finally:
         proc.terminate()
     print("FROZEN CHECK", "PASSED" if not failures else f"FAILED ({failures})")

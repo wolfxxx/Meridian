@@ -97,8 +97,11 @@ export function Runs({ model, runId, autorun }: { model: ModelDetail; runId?: st
             <div className="spread">
               <div className="stack" style={{ gap: 2 }}>
                 <h2>{current.label}</h2>
-                <span className="faint">{num(res.policies, 0)} policies · calculated in {seconds(res.seconds)} · {ago(current.finished)}</span>
+                <span className="faint">{num(res.policies, 0)} policies{current.data ? ` from ${current.data}` : ""} · calculated in {seconds(res.seconds)} · {ago(current.finished)}</span>
               </div>
+              <div className="row">
+              <a className="btn small" href={`/api/runs/${current.id}/export.csv`} download><Icon name="download" size={14} /> Export CSV</a>
+              <button className="btn small" onClick={() => go(model.id, "whatif")}><Icon name="sliders" size={14} /> What-if</button>
               {others.length > 0 && (
                 <label className="row faint" style={{ fontSize: 12.5 }}>Compare with
                   <select className="input" value={baselineId} onChange={(e) => setBaselineId(e.target.value)}>
@@ -107,6 +110,7 @@ export function Runs({ model, runId, autorun }: { model: ModelDetail; runId?: st
                   </select>
                 </label>
               )}
+              </div>
             </div>
             <div className="grid cols-4">
               {res.kpis.map((k, i) => <KpiTile key={k.label} k={k} baseline={baseline?.result?.kpis[i]} />)}

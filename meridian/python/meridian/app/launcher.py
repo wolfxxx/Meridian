@@ -94,6 +94,8 @@ def main(argv=None):
             print(f"Opening in your browser ({exc})")
             native = False
         if native:
+            # CSV exports and templates are downloads: show the usual "Save as" dialog.
+            webview.settings["ALLOW_DOWNLOADS"] = True
             window = webview.create_window("Meridian", html=SPLASH, width=1440, height=920,
                                            min_size=(1100, 720), background_color="#F3F5F7")
             result = {"ok": None}

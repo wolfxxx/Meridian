@@ -17,13 +17,16 @@ export function Workspace({ models, error }: { models: ModelSummary[] | null; er
       </div>
       {error && <ErrorNote error={error} />}
       {!models && !error && <div className="row"><Spinner /> <span className="muted">Loading models…</span></div>}
-      <div className="grid cols-3">
+      <div className="grid cols-3" data-tour="models">
         {(models || []).map((m) => (
           <div key={m.id} className="card model-card" role="button" tabIndex={0}
             onClick={() => go(m.id)} onKeyDown={(e) => { if (e.key === "Enter") go(m.id); }}>
             <div className="spread" style={{ alignItems: "flex-start" }}>
               <div className="model-glyph"><Icon name={MODEL_ICON[m.id] || "formula"} size={22} /></div>
-              <Badge tone={m.source.startsWith("lifelib") ? "ref" : ""}>{m.source}</Badge>
+              <div className="row" style={{ gap: 6 }}>
+                {m.data_source && <Badge tone="accent">Your data</Badge>}
+                <Badge tone={m.source.startsWith("lifelib") ? "ref" : ""}>{m.source}</Badge>
+              </div>
             </div>
             <div className="stack" style={{ gap: 4 }}>
               <h2>{m.name}</h2>
@@ -45,7 +48,7 @@ export function Workspace({ models, error }: { models: ModelSummary[] | null; er
               ) : <span className="faint" style={{ fontSize: 13 }}>Not run yet in this session.</span>}
             </div>
             <div className="row">
-              <button className="btn primary" onClick={(e) => { e.stopPropagation(); go(m.id, "run", { autorun: 1 }); }}>
+              <button className="btn primary" data-tour={`run-${m.id}`} onClick={(e) => { e.stopPropagation(); go(m.id, "run", { autorun: 1 }); }}>
                 <Icon name="play" size={15} /> Run
               </button>
               <button className="btn" onClick={(e) => { e.stopPropagation(); go(m.id); }}>Open <Icon name="arrow" size={15} /></button>

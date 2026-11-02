@@ -117,6 +117,7 @@ a { color: var(--accent); }
 .btn { display: inline-flex; align-items: center; gap: 8px; border-radius: 7px; border: 1px solid var(--line-strong);
   background: var(--surface); padding: 7px 13px; cursor: pointer; font-weight: 500; white-space: nowrap;
   transition: background-color 120ms, border-color 120ms; }
+a.btn { text-decoration: none; color: inherit; }
 .btn:hover { background: var(--surface-3); }
 .btn:disabled { opacity: 0.55; cursor: default; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
@@ -253,3 +254,55 @@ td.edited { background: var(--warn-soft); }
 .check-icon { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: var(--good-soft); color: var(--good); }
 .check-icon.fail { background: var(--bad-soft); color: var(--bad); }
 .kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; color: var(--ink-2); }
+
+/* dialogs */
+.modal-back { position: fixed; inset: 0; z-index: 50; background: rgba(8, 14, 20, 0.45); display: grid; place-items: center; padding: 24px; }
+.modal { max-width: 100%; max-height: calc(100vh - 48px); display: flex; flex-direction: column; box-shadow: var(--shadow-lg); outline: none; }
+.modal-body { padding: 18px 20px; overflow-y: auto; display: grid; gap: 16px; }
+.modal-foot { padding: 12px 20px; border-top: 1px solid var(--line); display: flex; justify-content: flex-end; gap: 10px; align-items: center; }
+
+/* file drop */
+.drop { border: 2px dashed var(--line-strong); border-radius: 10px; padding: 28px; text-align: center; display: grid; gap: 8px; justify-items: center;
+  color: var(--ink-2); background: var(--surface-2); cursor: pointer; transition: border-color 120ms, background-color 120ms; }
+.drop:hover, .drop.over { border-color: var(--accent); background: var(--accent-soft); }
+
+/* sliders */
+.lever { display: grid; gap: 6px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.lever:last-of-type { border-bottom: 0; }
+.lever-val { font-family: var(--mono); font-weight: 600; font-size: 13px; min-width: 64px; text-align: right; }
+.lever-val.moved { color: var(--accent-strong); }
+input[type="range"] { width: 100%; accent-color: var(--accent); margin: 0; }
+.ticks { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); }
+
+/* tornado */
+.tornado { display: grid; gap: 4px; }
+.tor-row { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 12px; align-items: center; min-height: 40px; }
+.tor-label { font-size: 13px; }
+.tor-label small { display: block; color: var(--ink-3); font-size: 11.5px; }
+.tor-track { position: relative; height: 34px; }
+.tor-track::before { content: ""; position: absolute; left: 50%; top: -4px; bottom: -4px; border-left: 1px solid var(--line-strong); }
+.tor-bar { position: absolute; height: 14px; border-radius: 3px; }
+.tor-bar.up { top: 2px; background: var(--c1); }
+.tor-bar.down { bottom: 2px; background: var(--c4); }
+.tor-num { position: absolute; font-family: var(--mono); font-size: 11px; color: var(--ink-2); white-space: nowrap; line-height: 14px; }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+
+/* compare table */
+.cmp th.run { min-width: 150px; text-align: right; white-space: normal; }
+.delta { display: block; font-size: 11.5px; color: var(--ink-3); }
+.delta.up { color: var(--accent-strong); }
+.delta.down { color: var(--ref); }
+.pick { display: flex; align-items: center; gap: 8px; padding: 7px 14px; border-bottom: 1px solid var(--line); cursor: pointer; font-size: 13px; }
+.pick:hover { background: var(--surface-2); }
+.pick input { accent-color: var(--accent); }
+
+/* tour */
+.tour-hole { position: fixed; z-index: 60; border-radius: 10px; box-shadow: 0 0 0 9999px rgba(8, 14, 20, 0.55); border: 2px solid var(--accent);
+  pointer-events: none; transition: all 260ms ease; }
+.tour-pop { position: fixed; z-index: 61; width: 360px; padding: 18px 20px; display: grid; gap: 10px; box-shadow: var(--shadow-lg); transition: top 260ms ease, left 260ms ease; }
+.tour-dots { display: flex; gap: 5px; }
+.tour-dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--line-strong); }
+.tour-dots i.on { background: var(--accent); }
+@media (prefers-reduced-motion: reduce) { .tour-hole, .tour-pop { transition: none; } }
+.welcome { display: grid; gap: 14px; justify-items: start; }
+.welcome ul { margin: 0; padding-left: 18px; color: var(--ink-2); display: grid; gap: 4px; }
