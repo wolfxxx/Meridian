@@ -500,28 +500,21 @@ class FuneralEntry(ModelEntry):
         return _trace_payload(tr, 360, self.policy_label(rows, policy), {"family": family})
 
     def validate(self):
-        import sys
-        tests_dir = Path(__file__).resolve().parents[3] / "tests"
+        from ..models import sa_funeral_check as ind
         rows = fu.synthetic_lives(40, seed=5)
         mp = fu.model_points(rows)
         pids = list(dict.fromkeys(rows["policy_id"]))
         checks, sample = [], []
-        try:
-            sys.path.insert(0, str(tests_dir))
-            import independent_funeral as ind  # available in the source checkout
-        except ImportError:
-            ind = None
         for basis in fu.BASES:
             res = mr_runner.run(fu.build(), mp, fu.tables(basis))
             ours = res.policy_sums["bel"][0].reshape(-1, fu.LIVES).sum(axis=1)
-            if ind is not None:
-                ref = np.array([ind.check_policy(rows, pid, basis) for pid in pids])
-                w = worst_rel(ours, ref)
-                checks.append({"name": f"BEL per policy, {basis.replace('_', ' ')} basis",
-                               "detail": f"{len(pids)} policies vs independent loop implementation",
-                               "metric": f"{w:.1e}", "passed": w < 1e-11})
-                if basis == "base":
-                    sample = [{"policy": pids[i], "meridian": float(ours[i]), "reference": float(ref[i])} for i in range(8)]
+            ref = np.array([ind.check_policy(rows, pid, basis) for pid in pids])
+            w = worst_rel(ours, ref)
+            checks.append({"name": f"BEL per policy, {basis.replace('_', ' ')} basis",
+                           "detail": f"{len(pids)} policies vs independent loop implementation",
+                           "metric": f"{w:.1e}", "passed": w < 1e-11})
+            if basis == "base":
+                sample = [{"policy": pids[i], "meridian": float(ours[i]), "reference": float(ref[i])} for i in range(8)]
         ref_np = mr_runner.run(fu.build(10), mp, fu.tables(), engine="numpy")
         ours_np = mr_runner.run(fu.build(10), mp, fu.tables())
         w = max(worst_rel(ours_np.policy_sums[k], ref_np.policy_sums[k]) for k in ours_np.policy_sums)

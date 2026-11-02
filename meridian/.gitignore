@@ -11,3 +11,4 @@ __pycache__/
 /lifelib_work/
 /python/meridian/app/static/
 /ui/node_modules/
+/build/

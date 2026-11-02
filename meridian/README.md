@@ -28,9 +28,22 @@ change assumptions, run it, explain any number and see the validation evidence.
 | Explain | Pick a policy or life and a month; follow any number back through its formula and inputs |
 | Validation | Reconciliation against lifelib, or against the independent implementation, with pass marks and evidence |
 
-**Start it** (after the build steps below): double-click `Start Meridian.cmd`, or run
+**Install it** (for users): run `Meridian-Setup-<version>.exe` and click the Meridian icon. It
+installs for the current user only: no administrator rights, Python, Rust or command line
+needed, and it can be removed from Windows "Installed apps". The installer is about 40 MB.
+
+**Start it from source** (after the build steps below): double-click `Start Meridian.cmd`, or run
 `.\.venv\Scripts\python -m meridian.app`. It opens in its own window, or in your browser if no
-web view is available.
+web view (Edge WebView2) is available.
+
+**Build the installer:** `.\.venv\Scripts\python packaging\build_installer.py` builds the
+interface, freezes the app with PyInstaller (`packaging/meridian.spec`), and runs two checks:
+- the window smoke test;
+- `packaging/check_frozen.py`, which runs every model and every validation inside the frozen app.
+
+It then compiles `packaging/meridian.iss` with Inno Setup 6 into `dist/`. In GitHub
+Actions, `.github/workflows/release.yml` does the same on a Windows runner. Run it by hand or
+push a `v*` tag, which also attaches the installer to a GitHub release.
 
 The interface is in `ui/` (React + TypeScript; `npm install && npm run build` writes it into the
 Python package). The local service is in `python/meridian/app/`: `catalog.py` describes each

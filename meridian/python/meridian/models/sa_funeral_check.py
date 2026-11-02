@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 
-from meridian.models import sa_funeral as f
+from . import sa_funeral as f
 
 
 def bel_one_policy(lives: list[dict], basis: list[float], years: int = 50) -> float:

@@ -206,9 +206,7 @@ def cashvalue() -> dict:
 
 
 def funeral(n_policies: int = 20_000) -> dict:
-    import sys
-    sys.path.insert(0, str(ROOT / "tests"))
-    import independent_funeral as ind
+    from meridian.models import sa_funeral_check as ind
 
     rows = fu.synthetic_lives(n_policies)
     mp = fu.model_points(rows)

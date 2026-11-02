@@ -6,7 +6,7 @@ import pytest
 import meridian as mr
 from meridian.models import sa_funeral as f
 
-import independent_funeral as ind
+from meridian.models import sa_funeral_check as ind
 
 
 @pytest.fixture(scope="module")

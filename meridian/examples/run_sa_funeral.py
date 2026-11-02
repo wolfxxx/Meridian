@@ -6,17 +6,14 @@ All assumptions are illustrative (see meridian/models/sa_funeral.py).
 """
 
 import argparse
-import sys
 import time
-from pathlib import Path
 
 import numpy as np
 
 import meridian as mr
 from meridian.models import sa_funeral as f
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tests"))
-import independent_funeral as ind  # noqa: E402
+from meridian.models import sa_funeral_check as ind  # noqa: E402
 
 
 def rand(x):
