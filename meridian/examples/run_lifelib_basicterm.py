@@ -14,7 +14,7 @@ import numpy as np
 import meridian as mr
 from meridian.models import lifelib_basicterm as bt
 
-REF = Path(__file__).resolve().parents[1] / "tests" / "data" / "lifelib_basicterm"
+REF = Path(mr.__file__).resolve().parent / "validation_data" / "lifelib_basicterm"
 
 
 def read_ref(name):

@@ -7,7 +7,7 @@
 derived from the first 1,000 rows of `model_point_10000.csv` with random in-force durations and
 account values (see `meridian/tools/make_lifelib_cashvalue_reference.py`).
 
-lifelib's results for the same inputs are in `meridian/tests/data/lifelib_cashvalue/`. Meridian
+lifelib's results for the same inputs are in `meridian/python/meridian/validation_data/lifelib_cashvalue/`. Meridian
 is reconciled against them in `meridian/tests/test_lifelib_cashvalue.py`.
 
 lifelib's licence, copied from the installed package's `LICENSE.txt`:

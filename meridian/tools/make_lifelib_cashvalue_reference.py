@@ -26,7 +26,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
 WORK = ROOT / "lifelib_work"
-OUT = ROOT / "tests" / "data" / "lifelib_cashvalue"
+OUT = ROOT / "python" / "meridian" / "validation_data" / "lifelib_cashvalue"
 INPUTS = ROOT / "python" / "meridian" / "models" / "data" / "lifelib_cashvalue"
 
 PV_ITEMS = {

@@ -26,8 +26,8 @@ from meridian.models import lifelib_cashvalue as cv
 from meridian.models import sa_funeral as fu
 
 ROOT = Path(__file__).resolve().parent.parent
-REF_BT = ROOT / "tests" / "data" / "lifelib_basicterm"
-REF_CV = ROOT / "tests" / "data" / "lifelib_cashvalue"
+REF_BT = ROOT / "python" / "meridian" / "validation_data" / "lifelib_basicterm"
+REF_CV = ROOT / "python" / "meridian" / "validation_data" / "lifelib_cashvalue"
 OUT = ROOT / "showcase" / "showcase_data.json"
 
 

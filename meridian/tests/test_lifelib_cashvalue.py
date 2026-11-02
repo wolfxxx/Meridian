@@ -14,7 +14,7 @@ import pytest
 
 from meridian.models import lifelib_cashvalue as cv
 
-DATA = Path(__file__).resolve().parent / "data" / "lifelib_cashvalue"
+DATA = Path(cv.__file__).resolve().parents[1] / "validation_data" / "lifelib_cashvalue"
 GROSS = ["pv_premiums", "pv_inv_income", "pv_claims_death", "pv_claims_lapse",
          "pv_claims_maturity", "pv_expenses", "pv_commissions", "pv_av_change"]
 SETS = {

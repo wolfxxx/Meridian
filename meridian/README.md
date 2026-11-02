@@ -12,6 +12,30 @@ into an intermediate representation (IR) and executed by a vectorised Rust engin
 > This is a prototype. Its reference models illustrate the modelling style and are not
 > certified actuarial libraries.
 
+## The Meridian app
+
+Meridian has a desktop app: one window where you can open a model, read its formulas,
+change assumptions, run it, explain any number and see the validation evidence.
+
+| Screen | What it does |
+|---|---|
+| Workspace | The models, their size and the latest result; run or open each one |
+| Overview | What the model is, latest results, assumptions and validation at a glance |
+| Variables | Every formula with its links: what it uses, what uses it, and a dependency graph (Prophet's Diagram View) |
+| Assumptions | Tables as charts and editable grids. Use "adjust every value by %" for quick sensitivities; edited tables are flagged and used by the next run |
+| Policy data | Distribution of every field, plus a searchable grid; click a row to explain it |
+| Run & results | One button, live progress, run history and comparison with a baseline run. Shows cash flows, present values, the scenario distribution with CTE70 (savings), and BEL by stress, SCR and risk margin (funeral) |
+| Explain | Pick a policy or life and a month; follow any number back through its formula and inputs |
+| Validation | Reconciliation against lifelib, or against the independent implementation, with pass marks and evidence |
+
+**Start it** (after the build steps below): double-click `Start Meridian.cmd`, or run
+`.\.venv\Scripts\python -m meridian.app`. It opens in its own window, or in your browser if no
+web view is available.
+
+The interface is in `ui/` (React + TypeScript; `npm install && npm run build` writes it into the
+Python package). The local service is in `python/meridian/app/`: `catalog.py` describes each
+model to the app, and `server.py` provides the API.
+
 ## Headline: two lifelib models, rebuilt and reconciled
 
 [lifelib](https://lifelib.io) is an open-source library of published actuarial models. Two of
@@ -109,7 +133,8 @@ Prerequisites: Rust stable (MSVC toolchain), Python ≥ 3.10.
 ```powershell
 cd meridian
 python -m venv .venv
-.\.venv\Scripts\python -m pip install "maturin>=1.7,<2.0" pytest numpy
+.\.venv\Scripts\python -m pip install "maturin>=1.7,<2.0" pytest numpy fastapi "uvicorn[standard]" pywebview httpx2
+cd ui; npm install; npm run build; cd ..                # builds the app interface
 $env:VIRTUAL_ENV = (Resolve-Path .venv).Path
 .\.venv\Scripts\python -m maturin develop --release   # builds the Rust extension into the venv
 

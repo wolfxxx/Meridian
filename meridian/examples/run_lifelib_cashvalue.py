@@ -13,7 +13,7 @@ import numpy as np
 import meridian as mr
 from meridian.models import lifelib_cashvalue as cv
 
-REF = Path(__file__).resolve().parents[1] / "tests" / "data" / "lifelib_cashvalue"
+REF = Path(mr.__file__).resolve().parent / "validation_data" / "lifelib_cashvalue"
 GROSS = ["pv_premiums", "pv_inv_income", "pv_claims_death", "pv_claims_lapse",
          "pv_claims_maturity", "pv_expenses", "pv_commissions", "pv_av_change"]
 

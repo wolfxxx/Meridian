@@ -4,7 +4,7 @@
 from conversion from `.xlsx` to `.csv`, from the **BasicTerm** models of the open-source
 [lifelib](https://lifelib.io) project (library `basiclife`, version 0.17.2), by the lifelib Developers.
 
-lifelib's results for the same inputs are in `meridian/tests/data/lifelib_basicterm/`. Meridian
+lifelib's results for the same inputs are in `meridian/python/meridian/validation_data/lifelib_basicterm/`. Meridian
 is reconciled against them in `meridian/tests/test_lifelib_basicterm.py`.
 
 lifelib's licence, copied from the installed package's `LICENSE.txt`:

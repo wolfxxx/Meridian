@@ -1,7 +1,7 @@
 """Reconciliation against lifelib's BasicTerm model — an independent, public reference.
 
 lifelib's own results for its 10,000 sample policies were produced by
-``tools/make_lifelib_reference.py`` and are stored in ``tests/data/lifelib_basicterm``.
+``tools/make_lifelib_reference.py`` and are stored in ``python/meridian/validation_data/lifelib_basicterm``.
 """
 
 import csv
@@ -14,7 +14,7 @@ import pytest
 import meridian as mr
 from meridian.models import lifelib_basicterm as bt
 
-DATA = Path(__file__).resolve().parent / "data" / "lifelib_basicterm"
+DATA = Path(mr.__file__).resolve().parent / "validation_data" / "lifelib_basicterm"
 
 
 def _read(name):

@@ -29,7 +29,7 @@ import pandas as pd
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 WORK = ROOT / "lifelib_work"
-OUT = ROOT / "tests" / "data" / "lifelib_basicterm"          # lifelib's results (targets)
+OUT = ROOT / "python" / "meridian" / "validation_data" / "lifelib_basicterm"  # lifelib's results (targets)
 INPUTS = ROOT / "python" / "meridian" / "models" / "data" / "lifelib_basicterm"  # model inputs
 
 

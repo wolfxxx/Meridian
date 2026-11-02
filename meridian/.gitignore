@@ -9,3 +9,5 @@ __pycache__/
 *.pdb
 /.venv-lifelib/
 /lifelib_work/
+/python/meridian/app/static/
+/ui/node_modules/

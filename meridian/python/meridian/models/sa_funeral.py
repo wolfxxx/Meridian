@@ -284,9 +284,16 @@ class SamResult:
     notes: list[str] = field(default_factory=list)
 
 
-def value(mp: dict, years: int = 50, engine: str = "rust") -> SamResult:
+def value(mp: dict, years: int = 50, engine: str = "rust",
+          overrides: dict | None = None, progress=None) -> SamResult:
+    """SAM valuation: base + six stress bases. ``overrides`` replaces assumption tables in every
+    basis (what-if runs); ``progress(done, total, label)`` is called after each run."""
     model = build(years)
-    results = {name: run(model, mp, tables(name), engine=engine) for name in BASES}
+    results = {}
+    for i, name in enumerate(BASES):
+        results[name] = run(model, mp, {**tables(name), **(overrides or {})}, engine=engine)
+        if progress:
+            progress(i + 1, len(BASES), name)
     bel = {name: float(r.policy_sums["bel"].sum()) for name, r in results.items()}
     d = {name: bel[name] - bel["base"] for name in bel}
     scr = {
@@ -302,7 +309,7 @@ def value(mp: dict, years: int = 50, engine: str = "rust") -> SamResult:
     years_idx = np.arange(0, years) * 12
     driver = pols[years_idx]
     projected = scr["life"] * driver / driver[0]
-    spot = tables()["spot"].values
+    spot = {**tables(), **(overrides or {})}["spot"].values
     disc = (1 + spot[np.minimum(np.arange(1, years + 1), len(spot) - 1)]) ** (-np.arange(1, years + 1))
     rm = float(COST_OF_CAPITAL * np.sum(projected * disc))
     n_pol = len(mp["policy_id"]) // LIVES
