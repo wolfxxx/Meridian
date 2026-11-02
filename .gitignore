@@ -1,0 +1,16 @@
+# Rust / Python build outputs (see also meridian/.gitignore)
+target/
+.venv/
+__pycache__/
+*.pyc
+*.pyd
+*.so
+dist/
+.pytest_cache/
+*.egg-info/
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

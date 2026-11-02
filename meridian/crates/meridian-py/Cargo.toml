@@ -1,0 +1,16 @@
+[package]
+name = "meridian-py"
+description = "Python bindings for the Meridian prototype engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "_engine"
+crate-type = ["cdylib"]
+
+[dependencies]
+meridian-core = { path = "../meridian-core" }
+pyo3 = "0.25"
+numpy = "0.25"
