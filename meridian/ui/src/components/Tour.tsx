@@ -11,7 +11,7 @@ const STEPS: Step[] = [
   { route: "#/m/funeral/overview", target: '[data-tour="tabs"]', title: "Everything about a model, in one place",
     body: "Formulas, assumptions, policy data, results, what-ifs, explanations and validation. Nothing to install, wire up or copy between files." },
   { route: "#/m/funeral/variables", target: '[data-tour="page"]', title: "Formulas you can read",
-    body: "Each variable is one readable formula, like a Prophet library variable. Click a name to follow it; the graph shows what feeds what." },
+    body: "Each variable is one readable formula, like a Prophet library variable. Click a name to follow it, or edit the formula: Meridian checks it as you type and previews the effect." },
   { route: "#/m/funeral/assumptions", target: '[data-tour="page"]', title: "Assumptions as tables",
     body: "Every table as a chart and an editable grid. Change a value or scale a whole table; edited tables are flagged and used by the next run." },
   { route: "#/m/funeral/whatif", target: '[data-tour="levers"]', title: "Ask what-if questions",

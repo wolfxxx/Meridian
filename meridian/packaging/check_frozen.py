@@ -84,6 +84,18 @@ def main(exe):
         failures += not ok
         print(f"  import     funeral    {'done' if ok else 'FAILED'}  {cut - 1} lives imported and run")
 
+        # formulas: check, save, run with the edit, revert
+        chk = call(base + "/api/models/term/formulas/claims/check", "POST",
+                   {"formula": "pols_death * mp.sum_assured * 1.1"})
+        call(base + "/api/models/term/formulas/claims", "PUT", {"formula": "pols_death * mp.sum_assured * 1.1"})
+        run = call(f"{base}/api/models/term/runs", "POST", {"options": {}})
+        r = wait_for(lambda: call(f"{base}/api/runs/{run['id']}"))
+        call(base + "/api/models/term/formulas/claims", "DELETE")
+        ok = chk["ok"] and len(chk["preview"]["series"]) == 2 and r["status"] == "done" \
+            and r["modified_formulas"] == ["claims"]
+        failures += not ok
+        print(f"  formula    term       {'done' if ok else 'FAILED'}  {r['label']}")
+
         s1 = call(base + "/api/settings", "PUT", {"tour_done": True})
         ok = s1["tour_done"] is True and os.path.exists(os.path.join(home, "settings.json"))
         failures += not ok

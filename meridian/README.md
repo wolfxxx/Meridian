@@ -21,13 +21,15 @@ change assumptions, run it, explain any number and see the validation evidence.
 |---|---|
 | Workspace | The models, their size and the latest result; run or open each one |
 | Overview | What the model is, latest results, assumptions and validation at a glance |
-| Variables | Every formula with its links: what it uses, what uses it, and a dependency graph (Prophet's Diagram View) |
+| Variables | Every formula with its links: what it uses, what uses it, and a dependency graph (Prophet's Diagram View). **Edit any formula in place**: it is checked as you type (unknown names with suggestions, circular references, wrong arguments), with a before/after preview for the first policy. Edited formulas are flagged, used by runs and explanations, and can be reverted; validation always checks the original model |
 | Assumptions | Tables as charts and editable grids. Use "adjust every value by %" for quick sensitivities; edited tables are flagged and used by the next run |
 | Policy data | Distribution of every field, plus a searchable grid; click a row to explain it. **Import your own data** from CSV: headings are matched by name (with common alternatives such as "SA" or "Gender"), every value is checked, and errors are listed with their spreadsheet row before anything changes. Semicolons, decimal commas and "R 10 000" are understood. Template and export buttons give you a CSV to start from |
 | Run & results | One button, live progress, run history and comparison with a baseline run. Shows cash flows, present values, the scenario distribution with CTE70 (savings), and BEL by stress, SCR and risk margin (funeral) |
 | What-if | Sliders for mortality, lapses, interest rates and product charges, applied on top of any edited tables. **Standard sensitivities** runs the base plus each assumption up and down and shows a tornado chart of what moves the result most. **Compare runs** puts up to four runs side by side, with differences and overlaid cash flows, and warns when runs use different policy data |
 | Explain | Pick a policy or life and a month; follow any number back through its formula and inputs |
 | Validation | Reconciliation against lifelib, or against the independent implementation, with pass marks and evidence |
+
+**Your work is kept between sessions**: edited tables and formulas, imported policy data and the last 40 runs of each model are saved in `%APPDATA%\Meridian\workspace` and restored on start-up through the same checks (anything that no longer fits is skipped and reported). Uninstalling leaves this folder in place.
 
 On first start a short guided tour introduces each part (reopen it from the **?** button). Run
 results export to CSV. Settings such as the theme are kept in `%APPDATA%\Meridian\settings.json`.

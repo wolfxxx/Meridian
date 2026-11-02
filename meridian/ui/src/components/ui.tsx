@@ -84,10 +84,10 @@ export function KpiTile({ k, baseline }: { k: KpiT; baseline?: KpiT }) {
   );
 }
 
-export function Segmented<T extends string | number>({ value, options, onChange, label }:
-  { value: T; options: [T, string][]; onChange: (v: T) => void; label: string }) {
+export function Segmented<T extends string | number>({ value, options, onChange, label, compact = false }:
+  { value: T; options: [T, string][]; onChange: (v: T) => void; label: string; compact?: boolean }) {
   return (
-    <div className="seg" role="group" aria-label={label}>
+    <div className={"seg" + (compact ? " compact" : "")} role="group" aria-label={label}>
       {options.map(([v, l]) => (
         <button key={String(v)} type="button" aria-pressed={v === value} onClick={() => onChange(v)}>{l}</button>
       ))}

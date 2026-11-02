@@ -329,7 +329,7 @@ def projection_length(mp: dict, tables: dict, last_age: int) -> int:
 
 def run_cashvalue(model_points: dict | None = None, *, scenarios: list[int] | None = None,
                   engine: str = "rust", tables: dict | None = None,
-                  generated_scenarios: int | None = None, seed: int = 1, **kw) -> Results:
+                  generated_scenarios: int | None = None, seed: int = 1, customize=None, **kw) -> Results:
     """Run CashValue_ME. ``tables`` overrides the default assumption tables (what-if runs);
     ``generated_scenarios`` replaces lifelib's 10 scenarios with that many fresh draws."""
     mp = model_points if model_points is not None else load_model_points()
@@ -337,6 +337,8 @@ def run_cashvalue(model_points: dict | None = None, *, scenarios: list[int] | No
     last_age = mort_table_last_age(tables)
     n_steps = projection_length(mp, tables, last_age)
     model = build(n_steps, last_age=last_age, surr_charge_max_dur=tables["surr_charge"].values.shape[1] - 1)
+    if customize is not None:  # e.g. formulas edited in the app
+        model = customize(model)
     if generated_scenarios:
         z = np.random.default_rng(seed).standard_normal((generated_scenarios, n_steps))
         scen = {"std_norm_rand": z}

@@ -4,7 +4,7 @@
 ; Start-menu and optional desktop shortcuts, an uninstaller, and "launch Meridian" at the end.
 
 #ifndef AppVersion
-  #define AppVersion "0.2.0"
+  #define AppVersion "0.3.0"
 #endif
 
 [Setup]

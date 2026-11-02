@@ -17,7 +17,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import settings as user_settings
+from ..formula import FormulaError
 from .catalog import clean, make_catalog
+from .workspace import Workspace
 
 STATIC = Path(__file__).resolve().parent / "static"
 
@@ -30,6 +32,11 @@ class RunRequest(BaseModel):
     options: dict = {}
     label: str | None = None
     group: str | None = None     # runs started together, e.g. a set of sensitivities
+
+
+class FormulaEdit(BaseModel):
+    formula: str
+    preview: bool = True
 
 
 class ImportRequest(BaseModel):
@@ -46,7 +53,8 @@ def csv_download(text: str, filename: str) -> Response:
 def create_app() -> FastAPI:
     app = FastAPI(title="Meridian", docs_url=None, redoc_url=None)
     catalog = make_catalog()
-    runs: dict[str, dict] = {}
+    ws = Workspace()
+    runs: dict[str, dict] = ws.restore(catalog)   # the user's saved work and run history
     validations: dict[str, dict] = {}
     pool = ThreadPoolExecutor(max_workers=2)
     runs_lock = threading.Lock()
@@ -79,15 +87,60 @@ def create_app() -> FastAPI:
 
     @app.put("/api/models/{model_id}/tables/{name}")
     def put_table(model_id: str, name: str, body: TableEdit):
+        e = entry(model_id)
         try:
-            return entry(model_id).set_table(name, body.values)
+            out = e.set_table(name, body.values)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
+        ws.save_tables(e)
+        return out
 
     @app.post("/api/models/{model_id}/tables/reset")
     def reset_tables(model_id: str):
-        entry(model_id).reset_tables()
+        e = entry(model_id)
+        e.reset_tables()
+        ws.save_tables(e)
         return {"ok": True}
+
+    # ---- formulas -----------------------------------------------------------------------------
+    @app.post("/api/models/{model_id}/formulas/{name}/check")
+    def check_formula(model_id: str, name: str, body: FormulaEdit):
+        e = entry(model_id)
+        try:
+            return e.check_formula(name, body.formula, preview=body.preview)
+        except KeyError as exc:
+            raise HTTPException(404, f"No variable called {name}") from exc
+
+    @app.put("/api/models/{model_id}/formulas/{name}")
+    def put_formula(model_id: str, name: str, body: FormulaEdit):
+        e = entry(model_id)
+        try:
+            e.set_formula(name, body.formula)
+        except KeyError as exc:
+            raise HTTPException(404, f"No variable called {name}") from exc
+        except FormulaError as exc:
+            raise HTTPException(400, exc.message) from exc
+        ws.save_formulas(e)
+        return e.detail()
+
+    @app.delete("/api/models/{model_id}/formulas/{name}")
+    def revert_formula(model_id: str, name: str):
+        e = entry(model_id)
+        e.revert_formula(name)
+        ws.save_formulas(e)
+        return e.detail()
+
+    @app.post("/api/models/{model_id}/formulas/reset")
+    def reset_formulas(model_id: str):
+        e = entry(model_id)
+        e.revert_formula(None)
+        ws.save_formulas(e)
+        return {"ok": True}
+
+    @app.get("/api/notices")
+    def notices():
+        out, ws.notes[:] = list(ws.notes), []
+        return out
 
     @app.get("/api/models/{model_id}/data")
     def data(model_id: str, offset: int = 0, limit: int = 100, search: str = ""):
@@ -102,12 +155,15 @@ def create_app() -> FastAPI:
             if not report.get("ok") or columns is None:
                 raise HTTPException(400, report.get("fatal") or "The file has errors; fix them and try again.")
             e.set_rows(columns, body.name)
+            ws.save_data(e)
             report["applied"] = True
         return clean(report)
 
     @app.post("/api/models/{model_id}/data/reset")
     def reset_data(model_id: str):
-        entry(model_id).reset_data()
+        e = entry(model_id)
+        e.reset_data()
+        ws.save_data(e)
         return {"ok": True}
 
     @app.get("/api/models/{model_id}/data/export.csv")
@@ -139,7 +195,7 @@ def create_app() -> FastAPI:
     def _brief(r):
         return {k: r.get(k) for k in ["id", "model", "label", "status", "progress", "message",
                                       "started", "finished", "seconds", "error", "kpis", "modified_tables",
-                                      "levers", "group", "data"]}
+                                      "levers", "group", "data", "modified_formulas", "restored"]}
 
     @app.post("/api/models/{model_id}/runs")
     def start_run(model_id: str, body: RunRequest):
@@ -151,12 +207,14 @@ def create_app() -> FastAPI:
             lever_label = e.lever_label(body.options)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
-        parts = ([lever_label] if lever_label else []) + (["edited " + ", ".join(modified)] if modified else [])
+        formulas = sorted(e.formula_overrides)
+        parts = ([lever_label] if lever_label else []) + (["edited " + ", ".join(modified)] if modified else []) \
+            + (["formula " + ", ".join(formulas)] if formulas else [])
         label = body.label or ("What-if: " + "; ".join(parts) if parts else "Base run")
         rec = {"id": rid, "model": model_id, "label": label, "status": "queued", "progress": 0.0,
                "message": "Waiting to start", "started": time.time(), "finished": None, "seconds": None,
                "error": None, "result": None, "kpis": None, "options": body.options, "modified_tables": modified,
-               "levers": levers, "group": body.group,
+               "levers": levers, "group": body.group, "modified_formulas": formulas,
                "data": (e.data_source or {}).get("name")}
         with runs_lock:
             runs[rid] = rec
@@ -178,9 +236,27 @@ def create_app() -> FastAPI:
                 rec["status"], rec["error"], rec["message"] = "failed", str(exc), "Run failed"
             rec["finished"] = time.time()
             rec["seconds"] = time.perf_counter() - t0
+            try:
+                with runs_lock:
+                    ws.save_run(rec)
+                    ws.prune_runs(runs)
+            except OSError:  # pragma: no cover - history is a convenience
+                traceback.print_exc()
 
         pool.submit(job)
         return _brief(rec)
+
+    @app.delete("/api/runs/{run_id}")
+    def delete_run(run_id: str):
+        r = runs.get(run_id)
+        if not r:
+            raise HTTPException(404, "No such run")
+        if r["status"] in ("queued", "running"):
+            raise HTTPException(400, "This run is still going; delete it when it has finished.")
+        with runs_lock:
+            runs.pop(run_id, None)
+            ws.delete_run(run_id)
+        return {"ok": True}
 
     @app.get("/api/models/{model_id}/runs")
     def list_runs(model_id: str):

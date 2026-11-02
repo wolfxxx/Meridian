@@ -306,3 +306,14 @@ input[type="range"] { width: 100%; accent-color: var(--accent); margin: 0; }
 @media (prefers-reduced-motion: reduce) { .tour-hole, .tour-pop { transition: none; } }
 .welcome { display: grid; gap: 14px; justify-items: start; }
 .welcome ul { margin: 0; padding-left: 18px; color: var(--ink-2); display: grid; gap: 4px; }
+
+/* formula editor */
+.code-wrap { display: grid; gap: 6px; }
+.code-lhs { font-size: 12.5px; color: var(--ink-3); }
+textarea.code { width: 100%; resize: vertical; font-family: var(--mono); font-size: 13.5px; line-height: 1.7; padding: 12px 14px;
+  border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-2); color: var(--ink); min-height: 84px; }
+textarea.code:focus { outline: 2px solid var(--accent); outline-offset: -1px; background: var(--surface); }
+pre.caret { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--bad); background: var(--bad-soft); border-radius: 6px; padding: 6px 10px; overflow-x: auto; }
+pre.caret mark { background: var(--bad); color: var(--surface); border-radius: 2px; }
+.edited-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); display: inline-block; flex: none; }
+.seg.compact button { padding: 5px 8px; font-size: 12.5px; }

@@ -4,7 +4,7 @@ export interface Kpi { label: string; value: number; unit: string; note: string;
 export interface ModelSummary {
   id: string; name: string; tagline: string; source: string; policies: number; rows: number; steps: number;
   variables: number; lives: number; modified_tables: string[]; last_run: RunBrief | null;
-  data_source: DataSource | null;
+  data_source: DataSource | null; modified_formulas: string[];
 }
 export interface DataSource { name: string; rows: number; at: number }
 export interface Lever { key: string; label: string; kind: "scale" | "shift"; min: number; max: number; step: number; unit: "%" | "pp"; help: string }
@@ -20,6 +20,13 @@ export interface Settings { theme: string | null; tour_done: boolean }
 export interface VariableSpec {
   name: string; formula: string; doc: string; init: number; refs: [string, number][]; inputs: string[];
   used_by: [string, number][]; cls: "C1" | "C2"; total: boolean; pv: boolean; tables: string[];
+  edited: boolean; original: string | null;
+}
+export interface PreviewSeries { name: string; before: (number | null)[]; after: (number | null)[]; changed: number; invalid_from: number | null }
+export interface FormulaCheck {
+  ok: boolean; error?: string; col?: number | null; formula?: string; cls?: string; unchanged?: boolean;
+  refs?: [string, number][]; inputs?: string[]; tables?: string[];
+  preview?: { label?: string; series?: PreviewSeries[]; error?: string };
 }
 export interface TableInfo { name: string; description: string; editable: boolean; shape: number[]; modified: boolean }
 export interface DataColumn { key: string; label: string; kind?: "id" | "money" }
@@ -28,6 +35,7 @@ export interface ModelDetail extends ModelSummary {
   description: string; currency: string; variables_spec: VariableSpec[]; tables: TableInfo[];
   data_columns: DataColumn[]; run_options: RunOption[];
   levers: Lever[]; sensitivities: { levers: Record<string, number> }[]; input_schema: SchemaField[];
+  formula_names: { inputs: string[]; tables: string[]; scenarios: string[]; functions: string[] };
 }
 export interface TableDim { kind: "range" | "categories"; start?: number; labels: string[] }
 export interface TableData {
@@ -39,6 +47,7 @@ export interface RunBrief {
   message: string; started: number; finished: number | null; seconds: number | null; error: string | null;
   kpis: Kpi[] | null; modified_tables: string[];
   levers: Record<string, number>; group: string | null; data: string | null;
+  modified_formulas?: string[]; restored?: boolean;
 }
 export interface Series { values: number[]; label: string }
 export interface RunResult {
@@ -91,6 +100,14 @@ export const api = {
   importData: (id: string, csv: string, name: string, apply = false) =>
     req<ImportReport>(`/api/models/${id}/data/import`, { method: "POST", body: JSON.stringify({ csv, name, apply }) }),
   resetData: (id: string) => req<{ ok: boolean }>(`/api/models/${id}/data/reset`, { method: "POST" }),
+  checkFormula: (id: string, name: string, formula: string) =>
+    req<FormulaCheck>(`/api/models/${id}/formulas/${name}/check`, { method: "POST", body: JSON.stringify({ formula }) }),
+  saveFormula: (id: string, name: string, formula: string) =>
+    req<ModelDetail>(`/api/models/${id}/formulas/${name}`, { method: "PUT", body: JSON.stringify({ formula }) }),
+  revertFormula: (id: string, name: string) => req<ModelDetail>(`/api/models/${id}/formulas/${name}`, { method: "DELETE" }),
+  resetFormulas: (id: string) => req<{ ok: boolean }>(`/api/models/${id}/formulas/reset`, { method: "POST" }),
+  deleteRun: (rid: string) => req<{ ok: boolean }>(`/api/runs/${rid}`, { method: "DELETE" }),
+  notices: () => req<string[]>("/api/notices"),
   settings: () => req<Settings>("/api/settings"),
   saveSettings: (s: Partial<Settings>) => req<Settings>("/api/settings", { method: "PUT", body: JSON.stringify(s) }),
   runs: (id: string) => req<RunBrief[]>(`/api/models/${id}/runs`),

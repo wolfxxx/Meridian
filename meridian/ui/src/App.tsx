@@ -29,6 +29,8 @@ export default function App() {
   const [theme, toggle] = useTheme(settings?.theme);
   const [tour, setTour] = useState<"off" | "welcome" | "on">("off");
   useEffect(() => { if (settings && !settings.tour_done) setTour("welcome"); }, [settings]);
+  const [notices, setNotices] = useState<string[]>([]);
+  useEffect(() => { api.notices().then(setNotices).catch(() => undefined); }, []);
   const endWelcome = (next: "off" | "on") => { setTour(next); api.saveSettings({ tour_done: true }).catch(() => undefined); };
   const [models, err, reload] = useAsync<ModelSummary[]>(() => api.workspace(), []);
   useEffect(() => { reload(); }, [route.model, route.section, reload]);
@@ -50,13 +52,13 @@ export default function App() {
               onClick={() => go(m.id, route.model === m.id ? route.section : "overview")}>
               <Icon name={MODEL_ICON[m.id] || "formula"} />
               <span className="label">{m.name}</span>
-              {m.modified_tables.length > 0 && <span className="badge warn" title="Assumptions edited">edited</span>}
+              {(m.modified_tables.length > 0 || m.modified_formulas.length > 0) && <span className="badge warn" title="Assumptions or formulas edited">edited</span>}
             </button>
           ))}
           {err && <div className="faint" style={{ padding: 10 }}>Could not reach the Meridian service.</div>}
         </nav>
         <div className="rail-foot">
-          <span className="faint" style={{ fontSize: 12 }}>Prototype · v0.2</span>
+          <span className="faint" style={{ fontSize: 12 }}>Prototype · v0.3</span>
           <span className="row" style={{ gap: 2 }}>
           <button className="icon-btn" onClick={() => setTour("on")} title="Take the tour" aria-label="Take the tour" data-tour="help">
             <Icon name="help" />
@@ -68,6 +70,13 @@ export default function App() {
         </div>
       </aside>
       <main className="main" id="main">
+        {notices.length > 0 && (
+          <div className="callout" style={{ margin: "16px 32px 0" }} role="status">
+            <Icon name="alert" />
+            <div className="stack" style={{ gap: 4, flex: 1 }}>{notices.map((n) => <span key={n}>{n}</span>)}</div>
+            <button className="icon-btn" onClick={() => setNotices([])} aria-label="Dismiss"><Icon name="close" size={16} /></button>
+          </div>
+        )}
         {route.model === null
           ? <Workspace models={models} error={err} />
           : <ModelPage key={route.model} modelId={route.model} section={route.section} params={route.params} onChanged={reload} />}

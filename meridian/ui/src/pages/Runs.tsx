@@ -30,7 +30,14 @@ export function Runs({ model, runId, autorun }: { model: ModelDetail; runId?: st
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autorun]);
 
-  const selected = runId || runs.find((r) => r.status === "done")?.id || runs[0]?.id;
+  async function remove(id: string) {
+    try { await api.deleteRun(id); } catch (e: any) { setError(String(e.message || e)); return; }
+    if (id === runId) go(model.id, "run");
+    if (id === baselineId) setBaselineId("");
+    loadRuns();
+  }
+
+  const selected = (runId && runs.some((r) => r.id === runId) ? runId : undefined) || runs.find((r) => r.status === "done")?.id || runs[0]?.id;
   useEffect(() => { if (selected) api.run(selected).then(setCurrent).catch((e) => setError(String(e.message || e))); else setCurrent(null); }, [selected]);
   const active = current && (current.status === "running" || current.status === "queued");
   useInterval(() => {
@@ -55,21 +62,28 @@ export function Runs({ model, runId, autorun }: { model: ModelDetail; runId?: st
               </select>
             </label>
           ))}
-          {model.modified_tables.length > 0
-            ? <div className="callout" style={{ fontSize: 12.5 }}><Icon name="edit" size={16} /><div>Uses your edited {model.modified_tables.join(", ")}. <button className="btn small ghost" onClick={() => go(model.id, "assumptions")}>Review</button></div></div>
-            : <span className="faint" style={{ fontSize: 12.5 }}>Uses the model’s original assumptions.</span>}
+          {model.modified_tables.length > 0 && <div className="callout" style={{ fontSize: 12.5 }}><Icon name="edit" size={16} /><div>Uses your edited {model.modified_tables.join(", ")}. <button className="btn small ghost" onClick={() => go(model.id, "assumptions")}>Review</button></div></div>}
+          {model.modified_formulas.length > 0 && <div className="callout" style={{ fontSize: 12.5 }}><Icon name="formula" size={16} /><div>Uses your edited formula{model.modified_formulas.length > 1 ? "s" : ""} for {model.modified_formulas.join(", ")}. <button className="btn small ghost" onClick={() => go(model.id, "variables", { v: model.modified_formulas[0] })}>Review</button></div></div>}
+          {!model.modified_tables.length && !model.modified_formulas.length && <span className="faint" style={{ fontSize: 12.5 }}>Uses the model’s original assumptions and formulas.</span>}
           <button className="btn primary big" onClick={start}><Icon name="play" size={16} /> Run model</button>
         </div>
         <div className="card">
-          <div className="card-head"><h3>Run history</h3><Icon name="history" /></div>
-          {runs.length === 0 && <div className="card-body faint">No runs yet in this session.</div>}
+          <div className="card-head"><h3>Run history</h3><span className="faint" style={{ fontSize: 12 }}>kept between sessions</span></div>
+          {runs.length === 0 && <div className="card-body faint">No runs yet.</div>}
           {runs.map((r) => (
             <button key={r.id} className="list-item" aria-current={r.id === selected} onClick={() => go(model.id, "run", { run: r.id })}>
               <span className="stack" style={{ gap: 1, textAlign: "left", minWidth: 0 }}>
                 <span style={{ fontWeight: 600, fontSize: 13 }}>{r.label}</span>
-                <span className="faint" style={{ fontSize: 12 }}>{ago(r.started)}{r.seconds ? ` · ${seconds(r.seconds)}` : ""}</span>
+                <span className="faint" style={{ fontSize: 12 }}>{ago(r.started)}{r.seconds ? ` · ${seconds(r.seconds)}` : ""}{r.data ? ` · ${r.data}` : ""}</span>
               </span>
-              {r.status === "done" ? <Badge tone="good">done</Badge> : r.status === "failed" ? <Badge tone="bad">failed</Badge> : <Spinner />}
+              <span className="row" style={{ gap: 4, flexWrap: "nowrap" }}>
+                {r.status === "done" ? <Badge tone="good">done</Badge> : r.status === "failed" ? <Badge tone="bad">failed</Badge> : <Spinner />}
+                {r.status !== "running" && r.status !== "queued" && (
+                  <span role="button" tabIndex={0} className="icon-btn" title="Delete this run" aria-label={`Delete ${r.label}`}
+                    onClick={(e) => { e.stopPropagation(); remove(r.id); }}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); remove(r.id); } }}><Icon name="close" size={14} /></span>
+                )}
+              </span>
             </button>
           ))}
         </div>

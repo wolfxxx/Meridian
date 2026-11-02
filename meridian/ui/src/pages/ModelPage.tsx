@@ -54,6 +54,10 @@ export function ModelPage({ modelId, section, params, onChanged }:
               <Badge tone={model.source.startsWith("lifelib") ? "ref" : ""}>{model.source}</Badge>
               {model.modified_tables.length > 0 && <Badge tone="warn">Edited: {model.modified_tables.join(", ")}</Badge>}
               {model.data_source && <Badge tone="accent">Your data: {model.data_source.name}</Badge>}
+              {model.modified_formulas.length > 0 && (
+                <button className="badge warn" style={{ border: 0, cursor: "pointer" }} onClick={() => go(model.id, "variables", { v: model.modified_formulas[0] })}
+                  title="Show edited formulas">Edited formula{model.modified_formulas.length > 1 ? "s" : ""}: {model.modified_formulas.join(", ")}</button>
+              )}
             </div>
             <p className="muted">{model.tagline}</p>
           </div>
@@ -74,7 +78,7 @@ export function ModelPage({ modelId, section, params, onChanged }:
       </div></header>
       <div className="page" data-tour="page">
         {section === "overview" && <Overview model={model} />}
-        {section === "variables" && <Variables model={model} selected={params.v} />}
+        {section === "variables" && <Variables model={model} selected={params.v} onChanged={refresh} />}
         {section === "assumptions" && <Assumptions model={model} selected={params.t} onChanged={refresh} />}
         {section === "data" && <PolicyData model={model} onChanged={refresh} />}
         {section === "whatif" && <WhatIf model={model} />}

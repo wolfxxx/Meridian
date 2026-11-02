@@ -18,7 +18,8 @@ from typing import Callable
 import numpy as np
 
 from .. import runner as mr_runner
-from ..dsl import Model, references
+from ..dsl import Model, ScenarioRef, TableLookup, references
+from ..formula import FormulaContext, FormulaError, parse_formula, with_formulas
 from ..models import lifelib_basicterm as bt
 from ..models import lifelib_cashvalue as cv
 from ..models import sa_funeral as fu
@@ -60,7 +61,7 @@ def strip_parens(f: str) -> str:
     return f
 
 
-def variable_spec(model: Model) -> list[dict]:
+def variable_spec(model: Model, original: Model | None = None, texts: dict | None = None) -> list[dict]:
     info = mr_runner.inspect(model)
     order, classes = info["order"], info["classes"]
     deps: dict[str, list] = {name: [] for name in model.variables}
@@ -76,13 +77,47 @@ def variable_spec(model: Model) -> list[dict]:
         d = model.variables[name]
         refs, inputs = raw[name]
         out.append({
-            "name": name, "formula": strip_parens(d.expr.formula()), "doc": d.doc, "init": d.init,
+            "name": name, "formula": (texts or {}).get(name) or strip_parens(d.expr.formula()),
+            "doc": d.doc, "init": d.init,
             "refs": sorted([list(r) for r in refs]), "inputs": sorted(inputs),
             "used_by": sorted(deps[name]), "cls": classes[name],
             "total": d.total, "pv": d.policy_sum,
             "tables": sorted({t for t in _tables_in(d.expr)}),
+            "original": (strip_parens(original.variables[name].expr.formula())
+                         if original is not None and name in original.variables else None),
         })
+    for v in out:
+        v["edited"] = v["name"] in (texts or {})
+        if not v["edited"]:
+            v["original"] = None
     return out
+
+
+def _names_in(model: Model, kind) -> set[str]:
+    out = set()
+    for d in model.variables.values():
+        seen, stack = set(), [d.expr]
+        while stack:
+            e = stack.pop()
+            if id(e) in seen:
+                continue
+            seen.add(id(e))
+            if isinstance(e, kind):
+                out.add(e.name)
+            stack.extend(e.children())
+    return out
+
+
+def references_all(model: Model) -> list[str]:
+    out = []
+    for d in model.variables.values():
+        out += references(d.expr)[1]
+    return out
+
+
+def friendly_compile_error(msg: str) -> str:
+    msg = msg.replace("`.lag(1)`", "name[t-1]")
+    return msg[0].upper() + msg[1:] if msg else msg
 
 
 def _tables_in(expr):
@@ -162,6 +197,8 @@ class ModelEntry:
     _data: dict | None = None
     data_source: dict | None = None   # None = the model's own data; else {"name", "rows", "at"}
     overrides: dict[str, Table] = field(default_factory=dict)
+    formula_overrides: dict[str, str] = field(default_factory=dict)   # variable -> formula text
+    headline: str = "net_cf"                                          # variable shown in previews
     lock: threading.Lock = field(default_factory=threading.Lock)
 
     # subclasses implement these
@@ -169,16 +206,98 @@ class ModelEntry:
     def load_rows(self) -> dict[str, np.ndarray]: ...
     def base_tables(self) -> dict[str, Table]: ...
     def run(self, options: dict, progress: Callable) -> dict: ...
-    def explain(self, policy: int, life: int, options: dict) -> dict: ...
+    def explain(self, policy: int, life: int, options: dict, customize=None) -> dict: ...
     def validate(self) -> list[dict]: ...
     def policy_label(self, rows: dict, i: int) -> str: ...
 
     # shared
     @property
     def model(self) -> Model:
+        """The model as the user has it: the built model with any edited formulas."""
         if self._model is None:
-            self._model = self.build()
+            self._model = self.customize(self.build())
         return self._model
+
+    # ---- formulas --------------------------------------------------------------------------
+    def input_names(self) -> set[str]:
+        return set(self.rows)
+
+    def formula_context(self, model: Model) -> FormulaContext:
+        return FormulaContext(model, set(self.base_tables()) | _names_in(model, TableLookup),
+                              self.input_names() | set(references_all(model)), _names_in(model, ScenarioRef))
+
+    def customize(self, model: Model, formulas: dict[str, str] | None = None) -> Model:
+        """Apply edited formulas (the entry's own, or ``formulas``) to a freshly built model."""
+        formulas = self.formula_overrides if formulas is None else formulas
+        if not formulas:
+            return model
+        ctx = self.formula_context(model)
+        return with_formulas(model, {n: parse_formula(f, ctx) for n, f in formulas.items() if n in model.variables})
+
+    def check_formula(self, name: str, text: str, preview: bool = True) -> dict:
+        """Parse, compile and (optionally) preview an edited formula without saving it."""
+        base = self.build()
+        if name not in base.variables:
+            raise KeyError(name)
+        ctx = self.formula_context(base)
+        try:
+            expr = parse_formula(text, ctx)
+        except FormulaError as exc:
+            return {"ok": False, "error": exc.message, "col": exc.col}
+        trial = {**self.formula_overrides, name: text}
+        try:
+            model = self.customize(base, trial)
+            info = mr_runner.inspect(model)
+        except FormulaError as exc:  # another saved formula no longer reads (should not happen)
+            return {"ok": False, "error": exc.message, "col": None}
+        except Exception as exc:
+            return {"ok": False, "error": friendly_compile_error(str(exc)), "col": None}
+        refs, inputs = references(expr)
+        out = {"ok": True, "formula": strip_parens(expr.formula()), "cls": info["classes"][name],
+               "refs": sorted([list(r) for r in refs]), "inputs": sorted(inputs),
+               "tables": sorted(set(_tables_in(expr))),
+               "unchanged": strip_parens(expr.formula()) == strip_parens(base.variables[name].expr.formula())}
+        if preview:
+            out["preview"] = self.preview(name, trial)
+        return clean(out)
+
+    def preview(self, name: str, trial: dict[str, str]) -> dict:
+        """The edited variable and the headline result for the first policy, before and after."""
+        try:
+            before = self.explain(0, 0, {}, customize=lambda m: self.customize(m))
+            after = self.explain(0, 0, {}, customize=lambda m: self.customize(m, trial))
+        except Exception as exc:  # pragma: no cover - shown to the user
+            return {"error": f"Could not calculate a preview: {exc}"}
+        out = {"label": after["label"], "series": []}
+        for v in dict.fromkeys([name, self.headline]):
+            a, b = before["values"].get(v), after["values"].get(v)
+            if b is None:
+                continue
+            a = a if a is not None else [None] * len(b)
+            bad = next((i for i, x in enumerate(b) if x is None), None)
+            changed = sum(1 for x, y in zip(a, b) if x != y)
+            out["series"].append({"name": v, "before": a, "after": b, "changed": changed, "invalid_from": bad})
+        return out
+
+    def set_formula(self, name: str, text: str) -> dict:
+        res = self.check_formula(name, text, preview=False)
+        if not res["ok"]:
+            raise FormulaError(res["error"], res.get("col"))
+        with self.lock:
+            if res["unchanged"]:
+                self.formula_overrides.pop(name, None)
+            else:
+                self.formula_overrides[name] = " ".join(text.split())   # as typed, on one line
+            self._model = None
+        return res
+
+    def revert_formula(self, name: str | None = None):
+        with self.lock:
+            if name is None:
+                self.formula_overrides.clear()
+            else:
+                self.formula_overrides.pop(name, None)
+            self._model = None
 
     @property
     def rows(self) -> dict[str, np.ndarray]:
@@ -266,14 +385,16 @@ class ModelEntry:
         return {"id": self.id, "name": self.name, "tagline": self.tagline, "source": self.source,
                 "policies": self.n_policies(), "rows": int(len(first)), "steps": self.model.n_steps,
                 "variables": len(self.model.variables), "lives": self.model.lives,
-                "modified_tables": sorted(self.overrides), "data_source": self.data_source}
+                "modified_tables": sorted(self.overrides), "data_source": self.data_source,
+                "modified_formulas": sorted(self.formula_overrides)}
 
     def n_policies(self) -> int:
         return int(len(next(iter(self.rows.values()))))
 
     def detail(self) -> dict:
         return clean({**self.summary(), "description": self.description, "currency": self.currency,
-                      "variables_spec": variable_spec(self.model),
+                      "variables_spec": variable_spec(self.model, self.build() if self.formula_overrides else None,
+                                                      self.formula_overrides),
                       "tables": [{"name": n, "description": self.table_info.get(n, {}).get("description", ""),
                                   "editable": self.table_info.get(n, {}).get("editable", False),
                                   "shape": list(t.values.shape), "modified": n in self.overrides}
@@ -281,7 +402,14 @@ class ModelEntry:
                       "data_columns": self.data_columns, "run_options": self.run_options,
                       "levers": [{k: v for k, v in lv.items() if k != "tables"} for lv in self.levers],
                       "sensitivities": self.sensitivities,
-                      "input_schema": [f.as_dict() for f in self.schema]})
+                      "input_schema": [f.as_dict() for f in self.schema],
+                      "formula_names": self.formula_names()})
+
+    def formula_names(self) -> dict:
+        from ..formula import FUNCTIONS
+        ctx = self.formula_context(self.build())
+        return {"inputs": sorted(ctx.inputs - {"life_active", "policy_index"}), "tables": sorted(ctx.tables),
+                "scenarios": sorted(ctx.scenarios), "functions": FUNCTIONS + ["t"] + (["life"] if ctx.lives > 1 else [])}
 
     def table(self, name: str) -> dict:
         t = self.tables()[name]
@@ -387,7 +515,7 @@ class TermEntry(ModelEntry):
         tables = {**self.base_tables(), **self.run_overrides(options)}
         # What-if levers change the projection only: premiums stay as priced on the model's basis.
         pricing = self.tables() if self.lever_values(options) else None
-        res = bt.run_basicterm(self.rows, tables, pricing_tables=pricing)
+        res = bt.run_basicterm(self.rows, tables, pricing_tables=pricing, model=self.model)
         progress(0.9, "Collecting results")
         p = res.projection
         ps = {k: float(v.sum()) for k, v in p.policy_sums.items()}
@@ -407,13 +535,17 @@ class TermEntry(ModelEntry):
             "policies": self.n_policies(),
         }
 
-    def explain(self, policy, life, options):
+    def input_names(self):
+        return set(self.rows) | {"premium_pp"}
+
+    def explain(self, policy, life, options, customize=None):
         rows = self.rows
+        model = (customize or self.customize)(self.build())
         one = {k: v[policy:policy + 1] for k, v in rows.items()}
-        priced = bt.run_basicterm(one, self.tables())
+        priced = bt.run_basicterm(one, self.tables(), model=model)
         one["premium_pp"] = priced.premium_pp
-        tr = mr_runner.trace(self.model, one, self.tables())
-        return _trace_payload(tr, self.model.n_steps, self.policy_label(rows, policy))
+        tr = mr_runner.trace(model, one, self.tables())
+        return _trace_payload(tr, model.n_steps, self.policy_label(rows, policy))
 
     def validate(self):
         res = bt.run_basicterm(bt.load_model_points(), bt.load_tables())
@@ -483,7 +615,7 @@ class SavingsEntry(ModelEntry):
         n = int(options.get("scenarios") or 0)
         progress(0.1, f"Projecting {'lifelib’s 10' if not n else n} scenarios")
         res = cv.run_cashvalue(self.rows, tables=self.run_overrides(options) or None,
-                               generated_scenarios=n or None)
+                               generated_scenarios=n or None, customize=self.customize)
         progress(0.9, "Collecting results")
         pv = res.policy_sums["pv_net_cf"].sum(axis=1)
         srt = np.sort(pv)
@@ -510,13 +642,13 @@ class SavingsEntry(ModelEntry):
             "policies": self.n_policies(),
         }
 
-    def explain(self, policy, life, options):
+    def explain(self, policy, life, options, customize=None):
         rows = self.rows
         tables = self.tables()
         last = cv.mort_table_last_age(tables)
         one = {k: v[policy:policy + 1] for k, v in rows.items()}
         n = cv.projection_length(one, tables, last)
-        model = cv.build(n, last_age=last)
+        model = (customize or self.customize)(cv.build(n, last_age=last))
         tr = mr_runner.trace(model, one, tables, cv.load_scenarios(n, [1]))
         return _trace_payload(tr, min(n, 600), self.policy_label(rows, policy) + " · scenario 1")
 
@@ -595,7 +727,7 @@ class FuneralEntry(ModelEntry):
         def step(done, total, name):
             progress(0.05 + 0.9 * done / total, f"Basis {done} of {total}: {name.replace('_', ' ')}")
 
-        r = fu.value(self.lanes, overrides=overrides, progress=step)
+        r = fu.value(self.lanes, overrides=overrides, progress=step, customize=self.customize)
         b = r.base
         prem = float(b.policy_sums["pv_premiums"].sum())
         series = {k: b.totals[k][0] for k in ["premiums", "claims", "expenses", "commission", "net_outgo", "policies_if", "deaths"]}
@@ -616,7 +748,10 @@ class FuneralEntry(ModelEntry):
             "policies": len(self._pids),
         }
 
-    def explain(self, policy, life, options):
+    def input_names(self):
+        return set(self.lanes)
+
+    def explain(self, policy, life, options, customize=None):
         # `policy` is a row (life) index in the admin data; find its policy and slot.
         rows = self.rows
         pid = rows["policy_id"][policy]
@@ -625,7 +760,8 @@ class FuneralEntry(ModelEntry):
         members = np.where(rows["policy_id"] == pid)[0]
         slot = int(np.where(members == policy)[0][0])
         _ = self.lanes
-        tr = mr_runner.trace(self.model, self.lanes, {k: v for k, v in self.tables().items()}, policy=p, life=slot)
+        model = (customize or self.customize)(self.build())
+        tr = mr_runner.trace(model, self.lanes, {k: v for k, v in self.tables().items()}, policy=p, life=slot)
         family = [{"row": int(i), "label": f"{rows['role'][i]} · {rows['sex'][i]}, {int(rows['age'][i])}"} for i in members]
         return _trace_payload(tr, 360, self.policy_label(rows, policy), {"family": family})
 
@@ -738,7 +874,7 @@ def make_catalog() -> dict[str, ModelEntry]:
                          "with their own cover and premium. The policy ends on lapse or the main member's death. "
                          "Valued on a SAM-style basis: best-estimate liability, six stresses, the life SCR after "
                          "correlation and a 6% cost-of-capital risk margin. Assumptions are illustrative."),
-            source="Illustrative assumptions", currency="R",
+            source="Illustrative assumptions", currency="R", headline="bel",
             table_info={"mortality": {"description": "Annual mortality by sex and age (illustrative, not an ASSA table)", "editable": True},
                         "role_loading": {"description": "Mortality loading by role", "editable": True},
                         "lapse": {"description": "Annual lapse rate by policy year (last value thereafter)", "editable": True},

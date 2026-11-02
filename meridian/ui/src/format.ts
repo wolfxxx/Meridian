@@ -53,7 +53,10 @@ export function ago(ts: number | null): string {
   const d = Date.now() / 1000 - ts;
   if (d < 60) return "just now";
   if (d < 3600) return `${Math.round(d / 60)} min ago`;
-  return new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const date = new Date(ts * 1000);
+  const time = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (date.toDateString() === new Date().toDateString()) return time;
+  return `${date.toLocaleDateString("en-ZA", { day: "numeric", month: "short" })} ${time}`;
 }
 
 export function kpiValue(k: { value: number; unit: string; format: string }): string {

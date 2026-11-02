@@ -285,10 +285,12 @@ class SamResult:
 
 
 def value(mp: dict, years: int = 50, engine: str = "rust",
-          overrides: dict | None = None, progress=None) -> SamResult:
+          overrides: dict | None = None, progress=None, customize=None) -> SamResult:
     """SAM valuation: base + six stress bases. ``overrides`` replaces assumption tables in every
     basis (what-if runs); ``progress(done, total, label)`` is called after each run."""
     model = build(years)
+    if customize is not None:  # e.g. formulas edited in the app
+        model = customize(model)
     results = {}
     for i, name in enumerate(BASES):
         results[name] = run(model, mp, {**tables(name), **(overrides or {})}, engine=engine)

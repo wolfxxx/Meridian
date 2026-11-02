@@ -45,7 +45,7 @@ export function Workspace({ models, error }: { models: ModelSummary[] | null; er
                   <span><span className="muted">{m.last_run.kpis[0].label}: </span>
                     <strong className="mono">{kpiValue(m.last_run.kpis[0])}</strong></span>
                 </div>
-              ) : <span className="faint" style={{ fontSize: 13 }}>Not run yet in this session.</span>}
+              ) : <span className="faint" style={{ fontSize: 13 }}>Not run yet.</span>}
             </div>
             <div className="row">
               <button className="btn primary" data-tour={`run-${m.id}`} onClick={(e) => { e.stopPropagation(); go(m.id, "run", { autorun: 1 }); }}>
