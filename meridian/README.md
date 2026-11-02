@@ -12,7 +12,18 @@ into an intermediate representation (IR) and executed by a vectorised Rust engin
 > This is a prototype. Its reference models illustrate the modelling style and are not
 > certified actuarial libraries.
 
-## Headline: lifelib's BasicTerm model, rebuilt and reconciled
+## Headline: two lifelib models, rebuilt and reconciled
+
+[lifelib](https://lifelib.io) is an open-source library of published actuarial models. Two of
+its models were rebuilt in Meridian's modelling language and reconciled **policy by policy**
+against lifelib's own output:
+
+| Model | What it exercises | Result | Speed (Meridian vs lifelib) |
+|---|---|---|---|
+| **BasicTerm** (term assurance, 10,000 policies) | select & ultimate mortality, premium from PVs (two-pass) | every premium identical to the cent; portfolio PV identical | 0.03 s vs 0.38 s |
+| **CashValue_ME** (savings / UL, stochastic) | account value with intra-month timing, COI on net amount at risk, surrender charges by product, single/level premiums, whole life to age 115, new and in-force business, 10 stochastic fund-return scenarios | gross PVs within 2e-14 (new business) and 4e-13 (in-force) per policy and scenario; portfolio PV by scenario identical to 4 decimals | **1.0 s for all 10 scenarios vs 172 s** |
+
+### BasicTerm in detail
 
 [lifelib](https://lifelib.io)'s `BasicTerm` model is an open-source, published term-assurance
 projection: 10,000 policies, monthly, select-and-ultimate mortality, a premium set from present
@@ -29,8 +40,33 @@ values. It was rebuilt in Meridian and reconciled policy by policy against lifel
 | Speed, 10,000 policies (pricing + projection passes) | Meridian 0.03 s; lifelib's NumPy-vectorised `BasicTerm_M` 0.38 s |
 | Speed, 1,000,000 policies | Meridian 1.6 s (about 300m policy-months/s) |
 
+### CashValue_ME (stochastic) in detail
+
+`examples/run_lifelib_cashvalue.py`, `tests/test_lifelib_cashvalue.py`. lifelib runs one
+scenario per call; Meridian runs all scenarios in one pass (lanes = scenarios × policies).
+
+| Check (every policy × every scenario) | New business (10,000 × 10 scenarios × 1,141 months) | In-force (1,000 × 3 × 1,109) |
+|---|---|---|
+| 8 gross PV items (premiums, investment income, death, surrender, maturity, expenses, commissions, change in AV) | worst relative difference 2.0e-14 | 4.4e-13 |
+| PV of net cash flow, relative to gross flows | 2.8e-15 | 1.1e-15 |
+| Portfolio PV of net cash flow by scenario | identical to 4 decimals, e.g. scenario 1: 51,184,096,016.2475 | identical to 4 decimals |
+| Monthly cash flows by scenario | ≤ 4e-14 | ≤ 4e-14 |
+| Time | Meridian 1.0 s (all 10 scenarios) vs lifelib 172 s | 0.12 s vs 19 s |
+
+The in-force set was made by giving 1,000 policies random durations and account values. It
+was then run through lifelib unchanged, so the existing-business logic is reconciled too.
+Capacity: 100 generated scenarios × 10,000 policies × 1,141 months (1.1bn policy-scenario-months)
+runs in about 12 s.
+
+Reconciliation also surfaced one convention that has to be explicit. After a whole-life policy
+matures, the per-policy account value keeps being rolled forward with no policies left, and
+ages pass the mortality table's end. lifelib's lookup returns q = 0 outside the table;
+Meridian's default clamps to the last row. Tables therefore take an explicit `fill=` setting
+(`Table(q, dims=[18, 0], fill=0.0)`), and the model states its choice. Nobody has to discover
+it from NaNs.
+
 lifelib's data is redistributed under its MIT licence: see
-`python/meridian/models/data/lifelib_basicterm/NOTICE.md`. The reference results come from
+`python/meridian/models/data/lifelib_basicterm/NOTICE.md` and `.../lifelib_cashvalue/NOTICE.md`. The reference results come from
 `tools/make_lifelib_reference.py`, which runs lifelib itself. It also checks that lifelib's
 seriatim `BasicTerm_S` and vectorised `BasicTerm_M` agree, to 4e-14.
 
@@ -49,7 +85,7 @@ meridian/
 │  ├─ tables.py                  multi-dimensional range/category tables, text categories
 │  └─ models/                    term_life (C1), with_profits (C2, stochastic), lifelib_basicterm
 ├─ tests/                        reconciliation and behaviour tests (Rust vs NumPy vs lifelib)
-├─ tools/make_lifelib_reference.py  regenerates lifelib's reference results (separate venv)
+├─ tools/                        regenerate lifelib's reference results (separate .venv-lifelib)
 └─ examples/                     demos and benchmark
 ```
 
@@ -67,7 +103,8 @@ $env:VIRTUAL_ENV = (Resolve-Path .venv).Path
 cargo test -p meridian-core                            # Rust tests
 .\.venv\Scripts\python -m pytest -q                     # Python reconciliation tests
 
-.\.venv\Scripts\python examples\run_lifelib_basicterm.py  # lifelib reconciliation showcase
+.\.venv\Scripts\python examples\run_lifelib_basicterm.py  # lifelib BasicTerm reconciliation
+.\.venv\Scripts\python examples\run_lifelib_cashvalue.py  # lifelib stochastic CashValue reconciliation
 .\.venv\Scripts\python examples\run_term_life.py       # C1 demo + trace/explain
 .\.venv\Scripts\python examples\run_with_profits.py    # C2 stochastic demo (CTE70)
 .\.venv\Scripts\python examples\bench.py               # NumPy vs Rust throughput
@@ -107,6 +144,7 @@ Language rules:
 - **Tables.** `tb.name[k1, k2, ...]` takes one key per dimension of a `mr.Table`:
   - **Integer-range dimensions** (e.g. `Table(q, dims=[18, 0])` for ages from 18 × durations from 0) floor and clamp the key.
   - **Category dimensions** (e.g. `dims=[["M", "F"], ["NS", "S"]]`) must match a label exactly. An unknown label gives NaN rather than a silent wrong value.
+  - **`fill=`** sets an explicit value for any key outside the table, e.g. `fill=0.0`.
 - **Text.** Model-point columns may be text, e.g. `sex = "F"`, and formulas can compare them: `where(mp.sex == "F", ...)`. Labels become deterministic numeric codes, so no list has to be declared.
 
 ## What the prototype demonstrates (spec mapping)

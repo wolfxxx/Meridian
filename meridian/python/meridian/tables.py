@@ -9,6 +9,11 @@ codes, sex). Lookups in a model are written ``tb.name[key1, key2, ...]``:
 * category keys must match a label exactly; an unknown label gives NaN, so it cannot pass
   silently into results.
 
+Keys outside the table follow the table's ``fill`` setting: ``fill=None`` (default) clamps
+range keys and gives NaN for unknown categories; ``fill=x`` returns ``x`` for *any* key outside
+the table (out-of-range, NaN or unknown category), e.g. ``fill=0.0`` like a pandas reindex
+with ``fill_value=0``.
+
 Text values (model-point columns such as ``sex = "F"``, labels in category tables, and string
 literals in formulas such as ``mp.sex == "F"``) are converted to numeric codes by
 :func:`category_code`, a deterministic hash. No category list has to be declared in advance.
@@ -68,7 +73,8 @@ class Table:
         lapse = Table([0.10, 0.06], dims=[["TERM10", "TERM20"]])
     """
 
-    def __init__(self, values, dims: Iterable[DimSpec] | None = None):
+    def __init__(self, values, dims: Iterable[DimSpec] | None = None, fill: float | None = None):
+        self.fill = None if fill is None else float(fill)
         arr = np.asarray(values, dtype=np.float64)
         if arr.ndim == 0:
             arr = arr.reshape(1)
@@ -115,14 +121,17 @@ class Table:
             key = np.asarray(key, dtype=np.float64)
             if spec[0] == "range":
                 k = np.floor(key) - spec[1]
-                k = np.where(np.isnan(k), 0.0, k)
-                pos = np.clip(k, 0, spec[2] - 1)
+                if self.fill is None:
+                    k = np.where(np.isnan(k), 0.0, k)
+                    pos = np.clip(k, 0, spec[2] - 1)
+                else:
+                    pos = np.where((k >= 0) & (k <= spec[2] - 1), k, np.nan)
             else:
                 codes = np.array([category_code(x) for x in spec[1]])
                 match = key[..., None] == codes
                 pos = np.where(match.any(axis=-1), match.argmax(axis=-1), np.nan)
             flat = flat + pos * stride
-        out = np.full(flat.shape, np.nan)
+        out = np.full(flat.shape, np.nan if self.fill is None else self.fill)
         ok = ~np.isnan(flat)
         out[ok] = self.values.reshape(-1)[flat[ok].astype(np.int64)]
         return out
@@ -130,7 +139,8 @@ class Table:
     def __repr__(self) -> str:
         parts = [f"range from {d[1]:g} ({d[2]})" if d[0] == "range" else f"categories {d[1]}"
                  for d in self.dims]
-        return f"Table(shape={self.values.shape}, dims=[{'; '.join(parts)}])"
+        fill = "" if self.fill is None else f", fill={self.fill:g}"
+        return f"Table(shape={self.values.shape}, dims=[{'; '.join(parts)}]{fill})"
 
 
 def as_table(x) -> Table:

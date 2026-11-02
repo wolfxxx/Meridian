@@ -547,3 +547,44 @@ fn table_key_count_must_match_dimensions() {
         Err(MeridianError::Shape(_))
     ));
 }
+
+#[test]
+fn table_fill_replaces_clamping_and_unknown_categories() {
+    let m = ir(json!({
+        "name": "fill", "n_steps": 1,
+        "nodes": [
+            {"op": "input", "name": "age"},
+            {"op": "input", "name": "cat"},
+            {"op": "table", "name": "q", "indices": [0, 1]}
+        ],
+        "variables": [{"name": "v", "expr": 2}],
+        "outputs": {"policy_sums": ["v"]}
+    }));
+    let model = compile(m).unwrap();
+    let q = TableData::new(
+        vec![1.0, 2.0, 3.0, 4.0],
+        vec![
+            TableDim::Range {
+                start: 18.0,
+                len: 2,
+            },
+            TableDim::Categories(vec![-1.0, -2.0]),
+        ],
+    )
+    .unwrap()
+    .with_fill(Some(0.0));
+    let mut mp = HashMap::new();
+    mp.insert("age".into(), vec![18.0, 19.9, 20.0, 17.0, f64::NAN, 18.0]);
+    mp.insert("cat".into(), vec![-1.0, -2.0, -1.0, -1.0, -1.0, -7.0]);
+    let mut tables = HashMap::new();
+    tables.insert("q".into(), q);
+    let inputs = Inputs {
+        n_policies: 6,
+        n_scenarios: 1,
+        model_points: mp,
+        tables,
+        ..Default::default()
+    };
+    let r = model.run(&inputs, &RunOptions::default()).unwrap();
+    assert_eq!(r.policy_sums[0].1, vec![1.0, 4.0, 0.0, 0.0, 0.0, 0.0]);
+}

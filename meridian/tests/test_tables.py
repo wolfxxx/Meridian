@@ -113,3 +113,21 @@ def test_table_validation_and_formula_text():
     assert "where((mp.sex == 'F')" in _model().formula("female_count")
     assert mr.category_code("F") == mr.category_code("F") != mr.category_code("M")
     assert mr.category_code("F") < -2.0 ** 52
+
+
+def test_fill_returns_value_for_any_key_outside_the_table():
+    m = mr.Model("fill", n_steps=1)
+
+    @m.var(policy_sum=True)
+    def q():
+        return m.tables.q[m.mp.age, m.mp.cls]
+
+    tb = {"q": Table([[1.0, 2.0], [3.0, 4.0]], dims=[18, ["A", "B"]], fill=0.0)}
+    mp = {"age": [18.0, 19.5, 20.0, 17.0, np.nan, 18.0], "cls": np.array(["A", "B", "A", "A", "A", "Z"])}
+    for engine in ("rust", "numpy"):
+        res = mr.run(m, mp, tb, engine=engine)
+        assert res.policy_sums["q"][0].tolist() == [1.0, 4.0, 0.0, 0.0, 0.0, 0.0], engine
+    # without fill: ages clamp, unknown category is NaN
+    clamp = mr.run(m, mp, {"q": Table([[1.0, 2.0], [3.0, 4.0]], dims=[18, ["A", "B"]])})
+    got = clamp.policy_sums["q"][0]
+    assert got[:5].tolist() == [1.0, 4.0, 3.0, 1.0, 1.0] and np.isnan(got[5])

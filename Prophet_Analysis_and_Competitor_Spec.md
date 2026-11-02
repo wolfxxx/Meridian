@@ -1250,6 +1250,11 @@ Services & IDE  Control-plane services, language server (LSP),          (Rust; T
   - Every premium is identical to the cent, and per-policy PVs agree within 2e-15 relative.
   - The portfolio PV of net cash flow is identical (14,489,630.534602).
   - Meridian runs both passes in 0.03 s, against 0.38 s for lifelib's NumPy-vectorised model, and 1m policies in 1.6 s.
+- **External stochastic reconciliation (lifelib CashValue_ME savings/UL model):** account value with intra-month timing, COI on net amount at risk, surrender charges, single and level premiums, whole life, new and in-force business, 10 stochastic scenarios.
+  - Gross PVs agree per policy and scenario within 2e-14 for new business (10,000 policies) and 4e-13 for in-force (1,000 policies).
+  - Portfolio PV by scenario is identical to 4 decimals.
+  - Meridian runs all 10 scenarios in one 1.0 s pass, against 172 s for lifelib (one scenario per run).
+  - Reconciliation surfaced an out-of-table lookup convention (lifelib returns 0 beyond the mortality table), now an explicit table `fill=` setting rather than an implicit rule.
 - **These are prototype numbers, not the §30.2 GA targets.**
 
 ---

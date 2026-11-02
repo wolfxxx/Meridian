@@ -670,8 +670,10 @@ impl CompiledModel {
             }
             RNode::Table { table, indices } => {
                 let td = ctx.data.tables[*table];
-                // Accumulate the flat row-major offset per lane in `out` (NaN = unknown
-                // category), then replace it with the looked-up value.
+                // Accumulate the flat row-major offset per lane in `out` (NaN = key outside
+                // the table), then replace it with the looked-up value or the table's fill.
+                let clamp = td.fill.is_none();
+                let outside = td.fill.unwrap_or(f64::NAN);
                 out.fill(0.0);
                 let mut key = take_buf(n);
                 for (d, &k) in indices.iter().enumerate() {
@@ -679,7 +681,7 @@ impl CompiledModel {
                     let dim = &td.dims[d];
                     let stride = td.stride(d) as f64;
                     for (o, x) in out.iter_mut().zip(key.iter()) {
-                        *o = match dim.position(*x) {
+                        *o = match dim.position(*x, clamp) {
                             Some(p) => *o + p as f64 * stride,
                             None => f64::NAN,
                         };
@@ -688,7 +690,7 @@ impl CompiledModel {
                 give_buf(key);
                 for o in out.iter_mut() {
                     *o = if o.is_nan() {
-                        f64::NAN
+                        outside
                     } else {
                         td.values[*o as usize]
                     };

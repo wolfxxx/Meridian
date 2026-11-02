@@ -2,13 +2,17 @@
 //!
 //! A table is a dense row-major array of values with one or more key dimensions. Each
 //! dimension is either:
-//! * an integer **range** of keys `start, start+1, ...` (ages, durations, policy years):
-//!   the key is floored and clamped to the range, so ages above the table's last row use the
-//!   last row, as Prophet tables commonly do (NaN keys use the first row);
-//! * a list of **category** codes (product codes, sex, smoker status): the key must match a
-//!   code exactly; an unknown category gives NaN so it cannot pass silently into results.
+//! * an integer **range** of keys `start, start+1, ...` (ages, durations, policy years);
+//! * a list of **category** codes (product codes, sex, smoker status).
 //!
-//! Text labels are turned into codes by the Python front end (see `meridian.categories`).
+//! Keys outside the table are handled by the table's `fill` setting, an explicit choice:
+//! * `fill = None` (default): range keys are floored and **clamped** (ages above the last row
+//!   use the last row; NaN keys use the first row); an unknown category gives **NaN**, so it
+//!   cannot pass silently into results;
+//! * `fill = Some(x)`: any key outside the table — a range key out of range (or NaN) or an
+//!   unknown category — returns `x` (e.g. `0.0`, as a reindex with `fill_value=0` would).
+//!
+//! Text labels are turned into codes by the Python front end (see `meridian.tables`).
 
 use crate::error::{MeridianError, Result};
 
@@ -30,21 +34,28 @@ impl TableDim {
         self.len() == 0
     }
 
-    /// Position of key `x` along this dimension, or `None` for an unknown category.
+    /// Position of key `x` along this dimension. `None` means the key is outside the table:
+    /// an unknown category, or (only when `clamp` is false) an out-of-range or NaN range key.
     #[inline]
-    pub fn position(&self, x: f64) -> Option<usize> {
+    pub fn position(&self, x: f64, clamp: bool) -> Option<usize> {
         match self {
             TableDim::Range { start, len } => {
                 let k = x.floor() - start;
                 let last = (*len - 1) as f64;
-                let k = if k.is_nan() || k < 0.0 {
-                    0.0
-                } else if k > last {
-                    last
+                if clamp {
+                    let k = if k.is_nan() || k < 0.0 {
+                        0.0
+                    } else if k > last {
+                        last
+                    } else {
+                        k
+                    };
+                    Some(k as usize)
+                } else if k >= 0.0 && k <= last {
+                    Some(k as usize)
                 } else {
-                    k
-                };
-                Some(k as usize)
+                    None // includes NaN
+                }
             }
             TableDim::Categories(codes) => codes.iter().position(|c| *c == x),
         }
@@ -56,6 +67,8 @@ pub struct TableData {
     /// Row-major values; the last dimension varies fastest.
     pub values: Vec<f64>,
     pub dims: Vec<TableDim>,
+    /// Value for keys outside the table; `None` = clamp ranges, NaN for unknown categories.
+    pub fill: Option<f64>,
     strides: Vec<usize>,
 }
 
@@ -86,8 +99,15 @@ impl TableData {
         Ok(TableData {
             values,
             dims,
+            fill: None,
             strides,
         })
+    }
+
+    /// Return keys outside the table as `fill` instead of clamping / NaN.
+    pub fn with_fill(mut self, fill: Option<f64>) -> Self {
+        self.fill = fill;
+        self
     }
 
     /// A 1-D table keyed 0, 1, 2, ...
@@ -121,18 +141,23 @@ mod tests {
             start: 18.0,
             len: 3,
         };
-        assert_eq!(d.position(17.0), Some(0));
-        assert_eq!(d.position(18.9), Some(0));
-        assert_eq!(d.position(19.0), Some(1));
-        assert_eq!(d.position(99.0), Some(2));
-        assert_eq!(d.position(f64::NAN), Some(0));
+        assert_eq!(d.position(17.0, true), Some(0));
+        assert_eq!(d.position(18.9, true), Some(0));
+        assert_eq!(d.position(19.0, true), Some(1));
+        assert_eq!(d.position(99.0, true), Some(2));
+        assert_eq!(d.position(f64::NAN, true), Some(0));
+        // without clamping, out-of-range and NaN keys are outside the table
+        assert_eq!(d.position(17.0, false), None);
+        assert_eq!(d.position(20.5, false), Some(2));
+        assert_eq!(d.position(21.0, false), None);
+        assert_eq!(d.position(f64::NAN, false), None);
     }
 
     #[test]
     fn categories_match_exactly() {
         let d = TableDim::Categories(vec![-5.0, -9.0]);
-        assert_eq!(d.position(-9.0), Some(1));
-        assert_eq!(d.position(-9.5), None);
+        assert_eq!(d.position(-9.0, true), Some(1));
+        assert_eq!(d.position(-9.5, true), None);
     }
 
     #[test]

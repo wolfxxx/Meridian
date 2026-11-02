@@ -77,7 +77,8 @@ def run(model: Model, model_points: dict, tables: dict | None = None,
             raise RuntimeError("Rust extension not built: run `maturin develop --release` in meridian/")
         raw = _engine.run(ir_json, mp, {k: v.flat_values() for k, v in tb.items()}, sc, n_pol,
                           n_scen, keep_history, chunk_size, strategy,
-                          table_dims={k: v.engine_dims() for k, v in tb.items()})
+                          table_dims={k: v.engine_dims() for k, v in tb.items()},
+                          table_fill={k: v.fill for k, v in tb.items() if v.fill is not None})
         seconds = time.perf_counter() - start
         steps = model.n_steps
         totals = {k: v.reshape(n_scen, steps) for k, v in raw["totals"].items()}
