@@ -22,6 +22,8 @@ manifest-path = "crates/meridian-py/Cargo.toml"
 python-source = "python"
 module-name = "meridian._engine"
 features = ["pyo3/extension-module"]
+# The built interface is gitignored (it is generated), so include it explicitly.
+include = [{ path = "python/meridian/app/static/**/*", format = "wheel" }]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -78,8 +78,15 @@ def test_numpy_reference_engine_agrees(result):
     ours = bt.run_basicterm(sub)
     ref = bt.run_basicterm(sub, engine="numpy")
     assert np.array_equal(ours.premium_pp, ref.premium_pp)
+    ps = ref.projection.policy_sums
+    # Net cash flow nearly cancels for some policies: measure it against the gross flows, since
+    # NumPy's exp/pow vary in the last digit with the CPU (e.g. AVX-512 code paths on CI).
+    gross = sum(np.abs(ps[g]) for g in ["pv_premiums", "pv_claims", "pv_expenses", "pv_commissions"])
     for k, v in ours.projection.policy_sums.items():
-        assert rel(v, ref.projection.policy_sums[k]).max() < 1e-11, k
+        if k == "pv_net_cf":
+            assert (np.abs(v - ps[k]) / np.maximum(gross, 1.0)).max() < 1e-11, k
+        else:
+            assert rel(v, ps[k]).max() < 1e-11, k
 
 
 def test_select_mortality_uses_attained_age_and_capped_duration():

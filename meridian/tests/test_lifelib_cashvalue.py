@@ -98,5 +98,10 @@ def test_numpy_reference_engine_agrees():
     mp = {k: v[:150] for k, v in cv.load_model_points("model_point_inforce_1000.csv").items()}
     a = cv.run_cashvalue(mp, scenarios=[1, 2])
     b = cv.run_cashvalue(mp, scenarios=[1, 2], engine="numpy")
+    # Net cash flow is measured against the gross flows (see test_lifelib_basicterm).
+    gross = sum(np.abs(b.policy_sums[g]) for g in GROSS)
     for k in a.policy_sums:
-        assert rel(a.policy_sums[k], b.policy_sums[k]).max() < 1e-11, k
+        if k == "pv_net_cf":
+            assert (np.abs(a.policy_sums[k] - b.policy_sums[k]) / np.maximum(gross, 1.0)).max() < 1e-11, k
+        else:
+            assert rel(a.policy_sums[k], b.policy_sums[k]).max() < 1e-11, k

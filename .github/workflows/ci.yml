@@ -52,6 +52,7 @@ jobs:
           python -m pip install "maturin>=1.7,<2.0" pytest numpy fastapi uvicorn httpx2
           maturin build --release --out dist
           python -m pip install --no-index --find-links dist meridian
+          python -c "import pathlib, meridian.app as a; p = pathlib.Path(a.__file__).parent / 'static' / 'index.html'; assert p.is_file(), 'interface missing from the package'; print('interface packaged')"
 
       - name: Python tests (reconciliation, engine, app service)
         run: python -m pytest -q
