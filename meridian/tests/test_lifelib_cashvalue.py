@@ -67,7 +67,15 @@ def test_portfolio_net_cash_flow_by_scenario(case):
                                   "av_change", "net_cf", "pols_if"])
 def test_monthly_cashflows_by_scenario(case, name):
     _, res, ref = case
-    assert rel(res.totals[name], ref[f"cf_{name}"]).max() < 1e-12, name
+    if name in ("av_change", "net_cf"):
+        # Net quantities: differences of large, nearly equal amounts. Measure them against the
+        # month's gross flows, as the present-value test does, so that last-digit differences
+        # between platforms' maths libraries (Windows vs Linux pow/exp) are not magnified.
+        gross = sum(np.abs(ref[f"cf_{k}"]) for k in ["premiums", "claims", "expenses", "commissions", "inv_income"])
+        err = np.abs(res.totals[name] - ref[f"cf_{name}"]) / np.maximum(gross, 1.0)
+        assert err.max() < 1e-12, name
+    else:
+        assert rel(res.totals[name], ref[f"cf_{name}"]).max() < 1e-12, name
 
 
 def test_no_nans_anywhere(case):
