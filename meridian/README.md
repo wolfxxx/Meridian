@@ -85,7 +85,8 @@ meridian/
 │  ├─ tables.py                  multi-dimensional range/category tables, text categories
 │  └─ models/                    term_life (C1), with_profits (C2, stochastic), lifelib_basicterm
 ├─ tests/                        reconciliation and behaviour tests (Rust vs NumPy vs lifelib)
-├─ tools/                        regenerate lifelib's reference results (separate .venv-lifelib)
+├─ tools/                        lifelib reference generators (separate .venv-lifelib), showcase data/build
+├─ showcase/                     shareable report: template.html + showcase_data.json -> meridian_report.html
 └─ examples/                     demos and benchmark
 ```
 
