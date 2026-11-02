@@ -23,6 +23,18 @@ against lifelib's own output:
 | **BasicTerm** (term assurance, 10,000 policies) | select & ultimate mortality, premium from PVs (two-pass) | every premium identical to the cent; portfolio PV identical | 0.03 s vs 0.38 s |
 | **CashValue_ME** (savings / UL, stochastic) | account value with intra-month timing, COI on net amount at risk, surrender charges by product, single/level premiums, whole life to age 115, new and in-force business, 10 stochastic fund-return scenarios | gross PVs within 2e-14 (new business) and 4e-13 (in-force) per policy and scenario; portfolio PV by scenario identical to 4 decimals | **1.0 s for all 10 scenarios vs 172 s** |
 
+A third model shows the kind of business this is for:
+
+| Model | What it exercises | Checks | Speed |
+|---|---|---|---|
+| **South African family funeral** (illustrative SAM basis) | up to 8 lives per policy (main member, spouse, children to age 21, extended family), policy ends on lapse or main-member death; BEL, six SAM-style stresses, SCR with the life correlation matrix, 6% cost-of-capital risk margin | BEL per policy equals an independent plain-Python loop implementation within 2e-13, under all 7 bases; Rust = NumPy reference | 20,000 policies (70,000 lives) × 600 months × 7 runs in about 8–11 s |
+
+`examples/run_sa_funeral.py`, `tests/test_sa_funeral.py`, `tests/independent_funeral.py`. All its
+assumptions are invented for illustration. Its mortality curve is shaped like South African
+population mortality but is not an ASSA or SA85-90 table. The SAM calculation is simplified:
+stresses are applied to the whole portfolio, and the risk margin is projected in proportion to
+policies in force.
+
 ### BasicTerm in detail
 
 [lifelib](https://lifelib.io)'s `BasicTerm` model is an open-source, published term-assurance
@@ -106,6 +118,7 @@ cargo test -p meridian-core                            # Rust tests
 
 .\.venv\Scripts\python examples\run_lifelib_basicterm.py  # lifelib BasicTerm reconciliation
 .\.venv\Scripts\python examples\run_lifelib_cashvalue.py  # lifelib stochastic CashValue reconciliation
+.\.venv\Scripts\python examples\run_sa_funeral.py      # SA family funeral, SAM BEL/SCR/risk margin
 .\.venv\Scripts\python examples\run_term_life.py       # C1 demo + trace/explain
 .\.venv\Scripts\python examples\run_with_profits.py    # C2 stochastic demo (CTE70)
 .\.venv\Scripts\python examples\bench.py               # NumPy vs Rust throughput
@@ -146,6 +159,7 @@ Language rules:
   - **Integer-range dimensions** (e.g. `Table(q, dims=[18, 0])` for ages from 18 × durations from 0) floor and clamp the key.
   - **Category dimensions** (e.g. `dims=[["M", "F"], ["NS", "S"]]`) must match a label exactly. An unknown label gives NaN rather than a silent wrong value.
   - **`fill=`** sets an explicit value for any key outside the table, e.g. `fill=0.0`.
+- **Lives within a policy.** `Model(..., lives=8)` treats each 8 consecutive model-point rows as one policy's lives. Formulas are written per life. `life` is the slot number, and `sum_lives(x)` is the policy total, broadcast to every life. `mr.group_lives(rows, "policy_id", 8, pad=...)` arranges one-row-per-life data into padded policies. This is Prophet's array variables, and it keeps the fast per-chunk path.
 - **Text.** Model-point columns may be text, e.g. `sex = "F"`, and formulas can compare them: `where(mp.sex == "F", ...)`. Labels become deterministic numeric codes, so no list has to be declared.
 
 ## What the prototype demonstrates (spec mapping)
@@ -158,6 +172,7 @@ Language rules:
 | §19.4 execution strategies: C1 per-chunk with no barriers; C2 partitioned by scenario, each a segmented lockstep with barriers only where a total needs them | `engine.rs` `run_per_chunk` / `run_by_scenario` / `run_lockstep`; `compile.rs` `build_segments`; `inspect(model)["segments"]` |
 | §31.1: independent implementation for reconciliation | `reference.py` (Rust vs NumPy, 1e-11 relative); **external: lifelib BasicTerm**, with every premium identical and PVs within 2e-15 |
 | Tables and categories (the successor to Prophet's generic and parameter tables) | `tables.py`, `table.rs`; `tests/test_tables.py` |
+| Array variables / lives in a policy; run numbers as assumption sets | `Model(lives=8)`, `sum_lives`, `group_lives`; the funeral model's seven bases (`tb.basis['mass_lapse']`) |
 | DX-3: single-policy trace and "explain this number" | `runner.trace()`, `Trace.explain()` |
 | MS-12: assumption sets as data | `assumptions` and `wp_params` tables (swap them to run a sensitivity) |
 
@@ -215,8 +230,8 @@ These numbers were measured with other applications using about a third of the C
 1. **Cache footprint of large scenarios.** Done so far for C2: segmented lockstep, block-wise reductions and scenario partitioning. Each scenario group still holds every variable's buffers for all of its policies, about 4 MB for 20k policies. With 28 threads that exceeds this CPU's 33 MB shared L3, so large C2 runs remain partly memory-bound. Operator fusion (next item) shrinks the number of buffers. Holding state at narrower precision for non-governed exploratory runs is another option.
 2. **Operator fusion / code generation.** The interpreter materialises every intermediate node into a buffer. The next step is to fuse expression trees into single loops, then generate code with Cranelift or LLVM (spec §25.1).
 3. **Shared subexpressions are recomputed in the engine.** The Python tracer de-duplicates them in the IR, but the engine re-evaluates shared nodes. Add per-chunk memoisation.
-4. **Missing language features** (done: multi-dimensional range/category tables and text categories):
-   - arrays with named axes
+4. **Missing language features** (done: multi-dimensional range/category tables, text categories, lives within a policy):
+   - general arrays with named axes (funds, benefits)
    - procedural blocks
    - multiple time granularities
    - nested (C3) runs

@@ -145,24 +145,31 @@ class Trace:
 
 
 def trace(model: Model, model_points: dict, tables: dict | None = None,
-          scenarios: dict | None = None, *, policy: int = 0, scenario: int = 0) -> Trace:
+          scenarios: dict | None = None, *, policy: int = 0, scenario: int = 0,
+          life: int = 0) -> Trace:
     """Re-run a single policy/scenario with full history kept, for explanation.
 
-    Valid for C1 models. For C2 models a single policy cannot reproduce the portfolio
-    aggregates, so the full portfolio is run with history and the requested lane extracted.
+    For C1 models only the policy (all its lives, for a ``lives`` model) is re-run. For C2
+    models a single policy cannot reproduce the portfolio aggregates, so the full portfolio is
+    run with history and the requested lane extracted. ``policy`` counts policies; ``life``
+    picks the life within the policy for ``lives`` models.
     """
+    k = model.lives
+    if not 0 <= life < k:
+        raise ValueError(f"life must be in 0..{k - 1}")
+    lane = policy * k + life
     info = inspect(model)
     is_c2 = any(c == "C2" for c in info["classes"].values())
     mp_all = {k: encode_column(v) for k, v in model_points.items()}
     text_inputs = {k: v for k, v in model_points.items() if np.asarray(v).dtype.kind in ("U", "S", "O")}
     if is_c2:
         res = run(model, mp_all, tables, scenarios, keep_history=True)
-        values = {k: v[:, scenario, policy].copy() for k, v in res.history.items()}
+        values = {name: v[:, scenario, lane].copy() for name, v in res.history.items()}
     else:
-        mp_one = {k: v[policy:policy + 1] for k, v in mp_all.items()}
-        sc_one = {k: np.asarray(v)[scenario:scenario + 1] for k, v in (scenarios or {}).items()}
+        mp_one = {name: v[policy * k:(policy + 1) * k] for name, v in mp_all.items()}
+        sc_one = {name: np.asarray(v)[scenario:scenario + 1] for name, v in (scenarios or {}).items()}
         res = run(model, mp_one, tables, sc_one, keep_history=True)
-        values = {k: v[:, 0, 0].copy() for k, v in res.history.items()}
-    inputs = {k: (str(np.asarray(text_inputs[k])[policy]) if k in text_inputs else float(v[policy]))
-              for k, v in mp_all.items()}
+        values = {name: v[:, 0, life].copy() for name, v in res.history.items()}
+    inputs = {name: (str(np.asarray(text_inputs[name])[lane]) if name in text_inputs else float(v[lane]))
+              for name, v in mp_all.items()}
     return Trace(model, policy, scenario, values, inputs)

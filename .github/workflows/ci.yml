@@ -50,6 +50,7 @@ jobs:
         run: |
           python examples/run_lifelib_basicterm.py --scale 5
           python examples/run_lifelib_cashvalue.py
+          python examples/run_sa_funeral.py --policies 2000
 
       - name: Smoke benchmark
         run: python examples/bench.py --policies 20000 --years 20

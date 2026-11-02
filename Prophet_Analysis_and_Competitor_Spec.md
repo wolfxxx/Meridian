@@ -1255,6 +1255,10 @@ Services & IDE  Control-plane services, language server (LSP),          (Rust; T
   - Portfolio PV by scenario is identical to 4 decimals.
   - Meridian runs all 10 scenarios in one 1.0 s pass, against 172 s for lifelib (one scenario per run).
   - Reconciliation surfaced an out-of-table lookup convention (lifelib returns 0 beyond the mortality table), now an explicit table `fill=` setting rather than an implicit rule.
+- **South African family funeral on a SAM-style basis (illustrative assumptions):** up to 8 lives per policy, using the new lives-within-a-policy feature (`Model(lives=8)`, `sum_lives`), which plays the role of Prophet's array variables.
+  - The valuation covers BEL, six SAM-style stresses, SCR with the life correlation matrix, and a 6% cost-of-capital risk margin.
+  - BEL per policy matches an independent loop implementation within 2e-13 under all 7 bases.
+  - 20,000 policies (70,000 lives) × 600 months × 7 runs take about 8–11 s.
 - **These are prototype numbers, not the §30.2 GA targets.**
 
 ---

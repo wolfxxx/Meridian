@@ -136,6 +136,14 @@ pub enum Node {
     SumPolicies {
         a: usize,
     },
+    /// The lane's position (0-based) within its group of lives (see `ModelIr::lives`).
+    Life,
+    /// Sum of the inner expression over the lives of the lane's group (the same policy) at
+    /// time `t`, broadcast back to each of those lives. Stays within a policy, so it does not
+    /// create cross-policy coupling.
+    SumLives {
+        a: usize,
+    },
 }
 
 impl Node {
@@ -145,10 +153,11 @@ impl Node {
             Node::Const { .. }
             | Node::Input { .. }
             | Node::Time
+            | Node::Life
             | Node::Var { .. }
             | Node::Scenario { .. } => vec![],
             Node::Table { indices, .. } => indices.clone(),
-            Node::Unary { a, .. } | Node::SumPolicies { a } => vec![*a],
+            Node::Unary { a, .. } | Node::SumPolicies { a } | Node::SumLives { a } => vec![*a],
             Node::Binary { a, b, .. } => vec![*a, *b],
             Node::Select { cond, a, b } => vec![*cond, *a, *b],
         }
@@ -181,10 +190,18 @@ pub struct Outputs {
 pub struct ModelIr {
     pub name: String,
     pub n_steps: usize,
+    /// Lives per policy: lanes come in consecutive groups of this size (1 = one life per
+    /// lane). Must be a power of two dividing the reduction block (1024).
+    #[serde(default = "one")]
+    pub lives: usize,
     pub nodes: Vec<Node>,
     pub variables: Vec<VarDef>,
     #[serde(default)]
     pub outputs: Outputs,
+}
+
+fn one() -> usize {
+    1
 }
 
 impl ModelIr {

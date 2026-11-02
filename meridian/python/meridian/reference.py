@@ -90,6 +90,9 @@ def run_reference(ir: dict, model_points: dict, tables: dict, scenarios: dict,
     pol = np.arange(lanes) % n_policies
     scen = np.arange(lanes) // n_policies
     init = {v["name"]: float(v.get("init", 0.0)) for v in variables}
+    k_lives = int(ir.get("lives", 1))
+    if n_policies % k_lives:
+        raise ValueError(f"lanes ({n_policies}) must be a multiple of lives per policy ({k_lives})")
     hist = {v["name"]: np.empty((n_steps, lanes)) for v in variables}
     order = _order(ir)
 
@@ -119,6 +122,11 @@ def run_reference(ir: dict, model_points: dict, tables: dict, scenarios: dict,
         elif op == "select":
             r = np.where(evaluate(n["cond"], t, cache) != 0,
                          evaluate(n["a"], t, cache), evaluate(n["b"], t, cache))
+        elif op == "life":
+            r = (np.arange(lanes) % k_lives).astype(float)
+        elif op == "sum_lives":
+            inner = evaluate(n["a"], t, cache).reshape(-1, k_lives)
+            r = np.repeat(inner.sum(axis=1), k_lives)
         elif op == "sum_policies":
             inner = evaluate(n["a"], t, cache).reshape(n_scenarios, n_policies)
             r = inner.sum(axis=1)[scen]

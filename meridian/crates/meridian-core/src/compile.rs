@@ -36,6 +36,8 @@ pub(crate) enum RNode {
     Binary(BinaryOp, usize, usize),
     Select(usize, usize, usize),
     SumPolicies(usize),
+    Life,
+    SumLives(usize),
 }
 
 /// A group of consecutive variables (in evaluation order) that can be evaluated in one
@@ -55,6 +57,8 @@ pub struct Segment {
 pub struct CompiledModel {
     pub name: String,
     pub n_steps: usize,
+    /// Lives per policy (lane group size).
+    pub lives: usize,
     pub(crate) nodes: Vec<RNode>,
     pub var_names: Vec<String>,
     pub(crate) var_expr: Vec<usize>,
@@ -121,6 +125,13 @@ pub fn compile(ir: ModelIr) -> Result<CompiledModel> {
         return Err(MeridianError::InvalidIr(
             "n_steps must be at least 1".into(),
         ));
+    }
+    if ir.lives == 0 || !ir.lives.is_power_of_two() || crate::sum::REDUCTION_BLOCK % ir.lives != 0 {
+        return Err(MeridianError::InvalidIr(format!(
+            "lives per policy must be a power of two dividing {} (got {})",
+            crate::sum::REDUCTION_BLOCK,
+            ir.lives
+        )));
     }
     if ir.variables.is_empty() {
         return Err(MeridianError::InvalidIr("model has no variables".into()));
@@ -208,6 +219,8 @@ pub fn compile(ir: ModelIr) -> Result<CompiledModel> {
             Node::Binary { func, a, b } => RNode::Binary(*func, *a, *b),
             Node::Select { cond, a, b } => RNode::Select(*cond, *a, *b),
             Node::SumPolicies { a } => RNode::SumPolicies(*a),
+            Node::Life => RNode::Life,
+            Node::SumLives { a } => RNode::SumLives(*a),
         };
         nodes.push(r);
     }
@@ -283,7 +296,11 @@ pub fn compile(ir: ModelIr) -> Result<CompiledModel> {
         for i in 0..nodes.len() {
             uniform[i] = match &nodes[i] {
                 RNode::Const(_) | RNode::Time => true,
-                RNode::Input(_) | RNode::Scenario(_) | RNode::SumPolicies(_) => false,
+                RNode::Input(_)
+                | RNode::Scenario(_)
+                | RNode::SumPolicies(_)
+                | RNode::Life
+                | RNode::SumLives(_) => false,
                 RNode::Var { var, .. } => var_uniform[*var],
                 RNode::Table { indices, .. } => indices.iter().all(|&k| uniform[k]),
                 RNode::Unary(_, a) => uniform[*a],
@@ -309,6 +326,7 @@ pub fn compile(ir: ModelIr) -> Result<CompiledModel> {
     Ok(CompiledModel {
         name: ir.name.clone(),
         n_steps: ir.n_steps,
+        lives: ir.lives,
         nodes,
         var_names: ir.variables.iter().map(|v| v.name.clone()).collect(),
         var_expr,
@@ -344,9 +362,10 @@ fn lag0_refs(nodes: &[RNode], root: usize) -> BTreeSet<usize> {
             | RNode::Const(_)
             | RNode::Input(_)
             | RNode::Time
+            | RNode::Life
             | RNode::Scenario(_) => {}
             RNode::Table { indices, .. } => stack.extend(indices.iter().copied()),
-            RNode::Unary(_, a) | RNode::SumPolicies(a) => stack.push(*a),
+            RNode::Unary(_, a) | RNode::SumPolicies(a) | RNode::SumLives(a) => stack.push(*a),
             RNode::Binary(_, a, b) => stack.extend([*a, *b]),
             RNode::Select(c, a, b) => stack.extend([*c, *a, *b]),
         }
@@ -425,7 +444,7 @@ fn walk(
                 walk(nodes, k, inside_agg, f, seen, var_name)?;
             }
         }
-        RNode::Unary(_, a) => walk(nodes, *a, inside_agg, f, seen, var_name)?,
+        RNode::Unary(_, a) | RNode::SumLives(a) => walk(nodes, *a, inside_agg, f, seen, var_name)?,
         RNode::Binary(_, a, b) => {
             walk(nodes, *a, inside_agg, f, seen, var_name)?;
             walk(nodes, *b, inside_agg, f, seen, var_name)?;
@@ -435,7 +454,7 @@ fn walk(
             walk(nodes, *a, inside_agg, f, seen, var_name)?;
             walk(nodes, *b, inside_agg, f, seen, var_name)?;
         }
-        RNode::Const(_) | RNode::Input(_) | RNode::Time | RNode::Scenario(_) => {}
+        RNode::Const(_) | RNode::Input(_) | RNode::Time | RNode::Life | RNode::Scenario(_) => {}
     }
     Ok(())
 }

@@ -138,6 +138,12 @@ impl CompiledModel {
                 "n_scenarios must be at least 1".into(),
             ));
         }
+        if inputs.n_policies % self.lives != 0 {
+            return Err(MeridianError::Shape(format!(
+                "the model has {} lives per policy, so the number of lanes ({}) must be a multiple of it",
+                self.lives, inputs.n_policies
+            )));
+        }
         let data = self.bind(inputs)?;
         Ok(match (opts.strategy, self.is_c2(), data.n_scen > 1) {
             (Strategy::Auto, false, _) => self.run_per_chunk(&data, opts),
@@ -376,7 +382,8 @@ impl CompiledModel {
     fn run_lockstep(&self, data: &Data, opts: &RunOptions, par: bool) -> Results {
         let (n_pol, n_scen, n_steps) = (data.n_pol, data.n_scen, data.n_steps);
         let lanes = n_pol * n_scen;
-        let chunk = opts.chunk_size.max(1);
+        // Chunks never split a policy's lives (`sum_lives` stays chunk-local).
+        let chunk = opts.chunk_size.max(1).div_ceil(self.lives) * self.lives;
         let nvar = self.var_names.len();
         let mut state: Vec<Vec<Vec<f64>>> = (0..nvar)
             .map(|v| vec![vec![0.0; lanes]; self.ring[v]])
@@ -730,6 +737,26 @@ impl CompiledModel {
                     .get(&i)
                     .expect("aggregate must be precomputed before evaluating its variable");
                 broadcast_per_scenario(out, lo, n_pol, |s| vals[s]);
+            }
+            RNode::Life => {
+                let k = self.lives;
+                for (j, o) in out.iter_mut().enumerate() {
+                    *o = ((lo + j) % k) as f64;
+                }
+            }
+            RNode::SumLives(a) => {
+                // Chunks (and per-chunk units) always start at a policy boundary and hold
+                // whole policies, so the lives of each policy are all in `out`.
+                let k = self.lives;
+                debug_assert!(lo % k == 0 && n % k == 0, "chunk must hold whole policies");
+                self.eval_chunk(*a, ctx, lo, out);
+                for group in out.chunks_mut(k) {
+                    let mut s = 0.0;
+                    for v in group.iter() {
+                        s += *v;
+                    }
+                    group.fill(s);
+                }
             }
         }
     }

@@ -588,3 +588,84 @@ fn table_fill_replaces_clamping_and_unknown_categories() {
     let r = model.run(&inputs, &RunOptions::default()).unwrap();
     assert_eq!(r.policy_sums[0].1, vec![1.0, 4.0, 0.0, 0.0, 0.0, 0.0]);
 }
+
+/// Lives within a policy: life index, per-policy sums, alignment across strategies.
+#[test]
+fn sum_lives_groups_lanes_by_policy() {
+    let m = ir(json!({
+        "name": "lives", "n_steps": 3, "lives": 4,
+        "nodes": [
+            {"op": "input", "name": "x"},                      // 0
+            {"op": "sum_lives", "a": 0},                       // 1  policy total of x
+            {"op": "life"},                                    // 2
+            {"op": "const", "value": 0.0},                     // 3
+            {"op": "binary", "func": "eq", "a": 2, "b": 3},    // 4  life == 0 (main)
+            {"op": "binary", "func": "mul", "a": 4, "b": 0},   // 5  x if main else 0
+            {"op": "sum_lives", "a": 5},                       // 6  main life's x, broadcast
+            {"op": "var", "name": "share", "lag": 1},          // 7
+            {"op": "binary", "func": "add", "a": 1, "b": 7}    // 8  tot + share[t-1]
+        ],
+        "variables": [
+            {"name": "tot", "expr": 1},
+            {"name": "main_x", "expr": 6},
+            {"name": "share", "expr": 8},
+            {"name": "life_no", "expr": 2}
+        ],
+        "outputs": {"policy_sums": ["tot", "main_x", "share", "life_no"], "totals": ["share"]}
+    }));
+    let model = compile(m).unwrap();
+    assert_eq!(model.class_of("tot"), Some(VarClass::C1));
+    // 3 policies x 4 lives, 2 scenarios
+    let x: Vec<f64> = (0..12).map(|i| (i + 1) as f64).collect();
+    let mut mp = HashMap::new();
+    mp.insert("x".into(), x);
+    let inputs = Inputs {
+        n_policies: 12,
+        n_scenarios: 2,
+        model_points: mp,
+        ..Default::default()
+    };
+    let base = model
+        .run(&inputs, &opts(2048, Strategy::Auto, true))
+        .unwrap();
+    assert_eq!(base.strategy, "per_chunk");
+    let tot = &base.policy_sums[0].1; // summed over 3 time steps
+    assert_eq!(&tot[0..4], &[30.0; 4]); // policy 0: (1+2+3+4) * 3 steps
+    assert_eq!(&tot[4..8], &[78.0; 4]); // policy 1: (5+6+7+8) * 3
+    let main_x = &base.policy_sums[1].1;
+    assert_eq!(&main_x[0..8], &[3.0, 3.0, 3.0, 3.0, 15.0, 15.0, 15.0, 15.0]);
+    assert_eq!(&base.policy_sums[3].1[0..4], &[0.0, 3.0, 6.0, 9.0]);
+    for (chunk, strategy) in [
+        (1, Strategy::Lockstep),
+        (5, Strategy::Lockstep),
+        (6, Strategy::Auto),
+    ] {
+        let r = model.run(&inputs, &opts(chunk, strategy, true)).unwrap();
+        assert_eq!(r.policy_sums, base.policy_sums, "chunk={chunk}");
+        assert_eq!(r.totals, base.totals, "chunk={chunk}");
+        assert_eq!(r.history, base.history, "chunk={chunk}");
+    }
+}
+
+#[test]
+fn lives_must_be_power_of_two_and_lanes_whole_policies() {
+    let bad = ir(json!({
+        "name": "l", "n_steps": 1, "lives": 3,
+        "nodes": [{"op": "life"}], "variables": [{"name": "a", "expr": 0}]
+    }));
+    assert!(matches!(compile(bad), Err(MeridianError::InvalidIr(_))));
+    let m = compile(ir(json!({
+        "name": "l", "n_steps": 1, "lives": 4,
+        "nodes": [{"op": "life"}], "variables": [{"name": "a", "expr": 0}]
+    })))
+    .unwrap();
+    let inputs = Inputs {
+        n_policies: 6,
+        n_scenarios: 1,
+        ..Default::default()
+    };
+    assert!(matches!(
+        m.run(&inputs, &RunOptions::default()),
+        Err(MeridianError::Shape(_))
+    ));
+}

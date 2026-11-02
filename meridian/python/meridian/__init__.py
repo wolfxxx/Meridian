@@ -12,16 +12,19 @@ from .dsl import (
     maximum,
     minimum,
     sqrt,
+    life,
+    sum_lives,
     sum_policies,
     t,
     where,
 )
 from .runner import Results, Trace, inspect, run, trace
+from .lives import group_lives
 from .tables import Table, category_code
 
 __all__ = [
     "Model", "Results", "Trace",
     "t", "where", "minimum", "maximum", "clip", "floor", "exp", "log", "sqrt", "sum_policies",
-    "run", "inspect", "trace", "Table", "category_code",
+    "run", "inspect", "trace", "Table", "category_code", "life", "sum_lives", "group_lives",
 ]
 __version__ = "0.1.0"

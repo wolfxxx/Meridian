@@ -23,6 +23,7 @@ import meridian as mr
 from meridian.dsl import references
 from meridian.models import lifelib_basicterm as bt
 from meridian.models import lifelib_cashvalue as cv
+from meridian.models import sa_funeral as fu
 
 ROOT = Path(__file__).resolve().parent.parent
 REF_BT = ROOT / "tests" / "data" / "lifelib_basicterm"
@@ -204,16 +205,80 @@ def cashvalue() -> dict:
     return out
 
 
+def funeral(n_policies: int = 20_000) -> dict:
+    import sys
+    sys.path.insert(0, str(ROOT / "tests"))
+    import independent_funeral as ind
+
+    rows = fu.synthetic_lives(n_policies)
+    mp = fu.model_points(rows)
+    fu.value({k: v[:80] for k, v in mp.items()}, years=5)  # warm-up
+    best, secs = None, None
+    for _ in range(2):
+        r = fu.value(mp)
+        if secs is None or r.seconds < secs:
+            best, secs = r, r.seconds
+    r = best
+    base = r.base
+    roles, counts = np.unique(rows["role"], return_counts=True)
+
+    # Independent loop implementation on 25 policies under every basis.
+    sub_ids = list(dict.fromkeys(rows["policy_id"]))[:25]
+    sub = {k: v[np.isin(rows["policy_id"], sub_ids)] for k, v in rows.items()}
+    sub_mp = fu.model_points(sub)
+    worst = 0.0
+    for basis in fu.BASES:
+        res = mr.run(fu.build(), sub_mp, fu.tables(basis))
+        ours = res.policy_sums["bel"][0].reshape(-1, fu.LIVES).sum(axis=1)
+        ref = np.array([ind.check_policy(sub, pid, basis) for pid in sub_ids])
+        worst = max(worst, float((np.abs(ours - ref) / np.maximum(1, np.abs(ref))).max()))
+
+    # Explorer: every life of one family policy.
+    pids = list(dict.fromkeys(rows["policy_id"]))
+    fam = next(pid for pid in pids if {"spouse", "child", "extended"} <= set(rows["role"][rows["policy_id"] == pid]))
+    p = pids.index(fam)
+    model = fu.build()
+    shown = 240
+    samples = []
+    idx = np.where(rows["policy_id"] == fam)[0]
+    for slot, i in enumerate(idx):
+        tr = mr.trace(model, mp, fu.tables(), policy=p, life=slot)
+        lab = (f"{fam} · life {slot + 1}: {rows['role'][i]} · {rows['sex'][i]}, age {int(rows['age'][i])} · "
+               f"cover R{int(rows['cover'][i]):,} · premium R{float(rows['premium'][i]):.2f}/month")
+        samples.append({"label": lab,
+                        "inputs": {k: (v if isinstance(v, str) else sig(v)) for k, v in tr.inputs.items()},
+                        "values": {k: sig(v[:shown], 10) for k, v in tr.values.items()}})
+    pols = base.totals["policies_if"][0]
+    return {
+        "n_policies": n_policies, "n_lives": int(len(rows["policy_id"])), "lanes": int(len(mp["policy_id"])),
+        "lives_by_role": {r_: int(c) for r_, c in zip(roles, counts)},
+        "n_steps": base.n_steps, "runs": r.runs, "seconds": secs,
+        "pv_premiums": float(base.policy_sums["pv_premiums"].sum()),
+        "pv_claims": float(base.policy_sums["pv_claims"].sum()),
+        "bel": r.bel, "scr": r.scr, "risk_margin": r.risk_margin, "tp": r.technical_provisions,
+        "stress_labels": fu.STRESS_LABELS,
+        "policies_by_year": [float(pols[12 * y]) for y in range(0, 31)],
+        "projected_scr": [float(x) for x in r.projected_scr[:31]],
+        "independent_worst": worst, "independent_policies": len(sub_ids),
+        "assumptions": {"commission": fu.COMMISSION, "expense_per_policy": fu.EXPENSE_PER_POLICY,
+                        "claim_expense": fu.CLAIM_EXPENSE, "expense_inflation": fu.EXPENSE_INFLATION,
+                        "mass_lapse": fu.MASS_LAPSE, "coc": fu.COST_OF_CAPITAL,
+                        "lapse_by_year": [float(x) for x in fu.tables()["lapse"].values]},
+        "model": model_spec(model), "samples": samples, "trace_steps": shown,
+    }
+
+
 def main():
     start = time.perf_counter()
-    rust_tests = 23
+    rust_tests = 25
     data = {
         "generated": time.strftime("%Y-%m-%d"),
         "machine": {"cpu": os.environ.get("SHOWCASE_CPU", platform.processor() or "unknown"),
                     "threads": os.cpu_count(), "os": f"{platform.system()} {platform.release()}"},
         "basicterm": basicterm(),
         "cashvalue": cashvalue(),
-        "tests": {"rust": rust_tests, "python": 83},
+        "funeral": funeral(),
+        "tests": {"rust": rust_tests, "python": 97},
     }
     OUT.parent.mkdir(exist_ok=True)
     OUT.write_text(json.dumps(data, separators=(",", ":")))

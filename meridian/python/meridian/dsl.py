@@ -131,6 +131,32 @@ class _Time(Expr):
 t = _Time()
 
 
+class _Life(Expr):
+    def _emit(self, emit):
+        return {"op": "life"}
+
+    def formula(self):
+        return "life"
+
+
+#: The life's slot within its policy, 0 .. lives-1 (models built with ``Model(..., lives=K)``).
+life = _Life()
+
+
+class SumLives(Expr):
+    def __init__(self, a: Expr):
+        self.a = a
+
+    def children(self):
+        return (self.a,)
+
+    def _emit(self, emit):
+        return {"op": "sum_lives", "a": emit(self.a)}
+
+    def formula(self):
+        return f"sum_lives({self.a.formula()})"
+
+
 class Input(Expr):
     def __init__(self, name: str):
         self.name = name
@@ -288,6 +314,15 @@ def sqrt(x) -> Expr:
     return Unary("sqrt", as_expr(x))
 
 
+def sum_lives(x) -> Expr:
+    """Sum of ``x`` over the lives of the same policy at the current time step.
+
+    For models built with ``Model(..., lives=K)``. Stays within a policy, so the model keeps
+    the fast per-chunk execution (no cross-policy synchronisation).
+    """
+    return SumLives(as_expr(x))
+
+
 def sum_policies(x) -> Expr:
     """Sum of ``x`` over all policies of the same scenario, at the current time step.
 
@@ -356,10 +391,13 @@ class Model:
     name: str
     n_steps: int
     variables: dict[str, VarDef] = field(default_factory=dict)
+    lives: int = 1
 
     def __post_init__(self):
         if self.n_steps < 1:
             raise ValueError("n_steps must be at least 1")
+        if self.lives < 1 or self.lives & (self.lives - 1) or 1024 % self.lives:
+            raise ValueError("lives must be a power of two dividing 1024 (e.g. 1, 2, 4, 8, 16)")
         self.v = _VarNamespace(self)
         self.mp = _InputNamespace()
         self.tables = _TableNamespace()
@@ -406,6 +444,7 @@ class Model:
         return {
             "name": self.name,
             "n_steps": self.n_steps,
+            "lives": self.lives,
             "nodes": nodes,
             "variables": variables,
             "outputs": {

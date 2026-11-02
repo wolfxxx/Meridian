@@ -151,7 +151,8 @@ footer pre { font-family: var(--font-data); font-size: 0.8rem; background: var(-
         variables as formulas in Python, and a Rust engine projects them across policies, scenarios
         and months. To test it against something independent, two published open-source models from
         <a href="https://lifelib.io" target="_blank" rel="noopener">lifelib</a> were rebuilt in Meridian
-        and checked policy by policy against lifelib's own results.</p>
+        and checked policy by policy against lifelib's own results. A third model, South African
+        family funeral cover valued on a SAM-style basis, shows the kind of business this is for.</p>
       <p class="muted">Designed and written by an AI assistant (Claude), directed by one actuary.
         Every number on this page comes from a run of the code.</p>
       <div class="keys">
@@ -210,6 +211,32 @@ footer pre { font-family: var(--font-data); font-size: 0.8rem; background: var(-
     <div class="panel"><div class="table-wrap"><table id="cv-prod"></table></div></div>
   </section>
 
+  <section class="col stack" id="funeral">
+    <div class="head">
+      <p class="eyebrow">Model 3 · South African family funeral · illustrative SAM basis</p>
+      <h2>One policy, up to eight lives</h2>
+      <p>Each policy covers a main member, a spouse, up to four children and up to two extended-family
+        members, each with their own cover and premium. The policy stays in force until it lapses or the
+        main member dies. Other deaths pay that life's cover and stop its premium, and children's cover
+        ends at 21. Every life is a lane of the engine and the eight lanes of a policy form one group:
+        <code>sum_lives</code> carries the main member's mortality to every life of the policy, the job
+        array variables do in Prophet. The valuation runs a base and six SAM-style stress bases, then
+        aggregates the SCR and adds a cost-of-capital risk margin.</p>
+      <p class="muted" id="fu-assume"></p>
+    </div>
+    <div class="grid-2">
+      <div class="panel"><div class="table-wrap"><table id="fu-bel"></table></div></div>
+      <div class="panel stack">
+        <div class="table-wrap"><table id="fu-scr"></table></div>
+        <div class="chart" id="fu-scr-chart"></div>
+      </div>
+    </div>
+    <div class="panel stack">
+      <h3>Checks</h3>
+      <p id="fu-check"></p>
+    </div>
+  </section>
+
   <section class="col stack" id="speed">
     <div class="head">
       <p class="eyebrow">Run time</p>
@@ -235,9 +262,10 @@ footer pre { font-family: var(--font-data); font-size: 0.8rem; background: var(-
           <div class="seg" role="group" aria-label="Model">
             <button type="button" id="ex-m-bt" aria-pressed="true">Term assurance</button>
             <button type="button" id="ex-m-cv" aria-pressed="false">Savings (scenario 1)</button>
+            <button type="button" id="ex-m-fu" aria-pressed="false">Family funeral</button>
           </div>
         </div>
-        <div class="control"><label for="ex-policy">Policy</label><select id="ex-policy"></select></div>
+        <div class="control"><label for="ex-policy" id="ex-policy-label">Policy</label><select id="ex-policy"></select></div>
         <div class="control"><label for="ex-t">Month</label>
           <div style="display:flex; gap:0.6rem; align-items:center; flex-wrap:wrap;">
             <input type="range" id="ex-t" min="0" max="240" value="12">
@@ -274,11 +302,13 @@ footer pre { font-family: var(--font-data); font-size: 0.8rem; background: var(-
         bit-for-bit identical whatever the thread count or batch size, and each lifelib comparison is
         repeatable from the repository. <span id="tests-line"></span></p>
       <p><strong>It does not show</strong> a comparison with Prophet itself. No Prophet software,
-        code or documentation was used. The models are lifelib's illustrative ones, not certified
-        regulatory libraries. Nested stochastic runs, goal-seek, arrays and the governance features in
-        the product spec are still to build.</p>
-      <p><strong>Next</strong>: a South African product (funeral cover for a family of lives) valued on a
-        SAM best-estimate basis.</p>
+        code or documentation was used. The lifelib models are illustrative, not certified regulatory
+        libraries. The funeral model uses invented assumptions: its mortality curve is shaped like
+        South African population mortality but is not an ASSA or SA85-90 table. Its SAM calculation is
+        simplified, with stresses applied to the whole portfolio and the risk margin projected in
+        proportion to policies in force. Nested stochastic runs, goal-seek and the governance features
+        in the product spec are still to build.</p>
+      <p><strong>Next</strong>: nested runs for projected reserves and capital, and goal-seek for premiums.</p>
     </div>
   </section>
 
@@ -299,7 +329,7 @@ python examples/run_lifelib_cashvalue.py --extra-scenarios 100</pre>
 (function () {
   "use strict";
   var D = JSON.parse(document.getElementById("data").textContent);
-  var BT = D.basicterm, CV = D.cashvalue;
+  var BT = D.basicterm, CV = D.cashvalue, FU = D.funeral;
   var SVGNS = "http://www.w3.org/2000/svg";
 
   // ---------- formatting ----------
@@ -369,7 +399,7 @@ python examples/run_lifelib_cashvalue.py --extra-scenarios 100</pre>
     [grouped(BT.portfolio_pv_net_cf.meridian, 6), "portfolio PV of net cash flow: the same figure in both", "BasicTerm · Meridian = lifelib"],
     [cvP.timing.meridian.toFixed(1) + " s vs " + Math.round(cvP.timing.lifelib) + " s",
      "10 stochastic scenarios × 10,000 policies, Meridian vs lifelib", "CashValue · " + grouped(cvP.n_steps, 0) + " months"],
-    [BT.timing.meridian_1m.toFixed(1) + " s", grouped(BT.timing.n_big, 0) + " term policies, priced and projected", "BasicTerm × 100"]
+    [FU.seconds.toFixed(1) + " s", "SAM BEL, six stresses, SCR and risk margin for " + grouped(FU.n_policies, 0) + " family policies (" + grouped(FU.n_lives, 0) + " lives)", "Family funeral · " + FU.runs + " runs"]
   ];
   var fg = document.getElementById("figures");
   figs.forEach(function (f) {
@@ -424,6 +454,57 @@ python examples/run_lifelib_cashvalue.py --extra-scenarios 100</pre>
   var prodNames = { A: "Single-premium endowment", B: "Single premium with surrender charge", C: "Level-premium whole life", D: "Level-premium whole life with surrender charge" };
   table("cv-prod", ["Product", "Mean PV of net cash flow over 10 scenarios"],
     Object.keys(CV.by_product).map(function (k) { return [k + " · " + prodNames[k], el("span", { class: "num", text: grouped(CV.by_product[k], 0) })]; }), [1]);
+
+  // ---------- funeral ----------
+  function rands(x) { return "R " + grouped(x, 0); }
+  (function () {
+    var a = FU.assumptions;
+    document.getElementById("fu-assume").textContent =
+      "Illustrative assumptions: commission " + (a.commission * 100) + "% of premium; expenses R" + a.expense_per_policy +
+      " per policy per month and R" + a.claim_expense + " per claim, inflating at " + (a.expense_inflation * 100).toFixed(1) +
+      "% a year; lapse rates by policy year " + a.lapse_by_year.map(function (x) { return Math.round(x * 100) + "%"; }).join(", ") +
+      " (last rate thereafter); discounting at an upward-sloping nominal curve from 7.5% to 10.5%.";
+    var rowsB = [["Base", el("span", { class: "num", text: rands(FU.bel.base) }), el("span", { class: "num muted", text: "" })]];
+    Object.keys(FU.stress_labels).forEach(function (k) {
+      var d = FU.bel[k] - FU.bel.base;
+      rowsB.push([FU.stress_labels[k], el("span", { class: "num", text: rands(FU.bel[k]) }),
+        el("span", { class: "num", text: (d >= 0 ? "+" : "−") + rands(Math.abs(d)).replace("R ", "R ") })]);
+    });
+    table("fu-bel", ["Basis", "BEL", "Change"], rowsB, [1, 2]);
+    var undiv = FU.scr.mortality + FU.scr.lapse + FU.scr.expense + FU.scr.catastrophe;
+    table("fu-scr", ["Capital and provisions", "Amount"], [
+      ["SCR mortality", el("span", { class: "num", text: rands(FU.scr.mortality) })],
+      ["SCR lapse (worst of up, down, mass)", el("span", { class: "num", text: rands(FU.scr.lapse) })],
+      ["SCR expense", el("span", { class: "num", text: rands(FU.scr.expense) })],
+      ["SCR catastrophe", el("span", { class: "num", text: rands(FU.scr.catastrophe) })],
+      ["SCR life, after correlation", el("span", { class: "num", text: rands(FU.scr.life) + " (−" + Math.round(100 * (1 - FU.scr.life / undiv)) + "%)" })],
+      ["Risk margin (6% cost of capital)", el("span", { class: "num", text: rands(FU.risk_margin) })],
+      ["Technical provisions = BEL + RM", el("span", { class: "num", text: rands(FU.tp) })]
+    ], [1]);
+    document.getElementById("fu-check").textContent =
+      "A separate, deliberately plain implementation (Python loops, one policy and one month at a time, written from the product description) gives the same BEL for " +
+      FU.independent_policies + " policies under all " + FU.runs + " bases: worst relative difference " + sci(FU.independent_worst) +
+      ". The Rust engine also agrees with the NumPy reference engine. Portfolio: " + grouped(FU.n_policies, 0) + " policies, " +
+      grouped(FU.n_lives, 0) + " lives (" + Object.keys(FU.lives_by_role).map(function (k) { return grouped(FU.lives_by_role[k], 0) + " " + k; }).join(", ") +
+      "), " + FU.n_steps + " months, " + FU.runs + " runs in " + FU.seconds.toFixed(1) + " s. PV of claims is " +
+      Math.round(100 * FU.pv_claims / FU.pv_premiums) + "% of PV of premiums.";
+  })();
+  function fuChart() {
+    var items = [["Mortality", FU.scr.mortality], ["Lapse", FU.scr.lapse], ["Expense", FU.scr.expense], ["Catastrophe", FU.scr.catastrophe],
+      ["Sum", FU.scr.mortality + FU.scr.lapse + FU.scr.expense + FU.scr.catastrophe], ["SCR life", FU.scr.life], ["Risk margin", FU.risk_margin]];
+    var W = 360, rowH = 24, L = 92, R = 70, T = 4, H = T + items.length * rowH + 4;
+    var box = document.getElementById("fu-scr-chart"); box.innerHTML = "";
+    var svg = sv("svg", { viewBox: "0 0 " + W + " " + H, role: "img", "aria-label": "SCR by module, diversified SCR and risk margin" });
+    var mx = items[4][1];
+    items.forEach(function (it, i) {
+      var y0 = T + i * rowH, w = (W - L - R) * it[1] / mx;
+      var lab = sv("text", { x: L - 8, y: y0 + 14, "text-anchor": "end" }); lab.textContent = it[0]; svg.appendChild(lab);
+      var col = i < 4 ? css("--meridian") : i === 4 ? css("--rule") : i === 5 ? css("--match") : css("--lifelib");
+      svg.appendChild(sv("rect", { x: L, y: y0 + 4, width: Math.max(w, 1), height: 14, fill: col, rx: 2 }));
+      var v = sv("text", { x: L + w + 6, y: y0 + 15 }); v.textContent = "R" + compact(it[1]); svg.appendChild(v);
+    });
+    box.appendChild(svg);
+  }
 
   // ---------- charts ----------
   function lineChart(id, series, opts) {
@@ -550,8 +631,8 @@ python examples/run_lifelib_cashvalue.py --extra-scenarios 100</pre>
 
   // ---------- explorer ----------
   var S = { model: "bt", sample: 0, t: 12, v: null, trail: [] };
-  var M = { bt: BT, cv: CV };
-  var KEYWORDS = { where: 1, min: 1, max: 1, floor: 1, exp: 1, ln: 1, sqrt: 1, abs: 1, sum_policies: 1, t: 1 };
+  var M = { bt: BT, cv: CV, fu: FU };
+  var KEYWORDS = { where: 1, min: 1, max: 1, floor: 1, exp: 1, ln: 1, sqrt: 1, abs: 1, sum_policies: 1, sum_lives: 1, life: 1, t: 1 };
   function spec() { return M[S.model].model; }
   function varSpec(name) { return spec().filter(function (v) { return v.name === name; })[0]; }
   function sample() { return M[S.model].samples[S.sample]; }
@@ -566,12 +647,18 @@ python examples/run_lifelib_cashvalue.py --extra-scenarios 100</pre>
   }
   function setModel(mk) {
     S.model = mk; S.sample = 0; S.trail = [];
-    S.v = mk === "bt" ? "pols_death" : "av_pp_bef_inv";
-    S.t = mk === "bt" ? 84 : 1;
-    document.getElementById("ex-m-bt").setAttribute("aria-pressed", mk === "bt");
-    document.getElementById("ex-m-cv").setAttribute("aria-pressed", mk === "cv");
+    S.v = { bt: "pols_death", cv: "av_pp_bef_inv", fu: "claims" }[mk];
+    S.t = { bt: 84, cv: 1, fu: 30 }[mk];
+    if (mk === "fu") {
+      var sp = 0;
+      FU.samples.forEach(function (s, i) { if (sp === 0 && s.label.indexOf(": spouse") >= 0) sp = i; });
+      S.sample = sp;
+    }
+    ["bt", "cv", "fu"].forEach(function (k) { document.getElementById("ex-m-" + k).setAttribute("aria-pressed", mk === k); });
+    document.getElementById("ex-policy-label").textContent = mk === "fu" ? "Life (one family policy)" : "Policy";
     var sel = document.getElementById("ex-policy"); sel.innerHTML = "";
     M[mk].samples.forEach(function (s, i) { sel.appendChild(el("option", { value: i, text: s.label })); });
+    sel.value = S.sample;
     renderVars(); render();
   }
   function go(name, t) {
@@ -656,7 +743,7 @@ python examples/run_lifelib_cashvalue.py --extra-scenarios 100</pre>
     box.appendChild(el("div", { class: "value-line" }, [
       el("span", { class: "vname", text: v.name + " at month " + S.t + " =" }),
       el("span", { class: "vval", text: fmt(valueAt(v.name, S.t)) }),
-      el("span", { class: "chip " + (v.cls === "C2" ? "plan" : "nb"), text: v.cls === "C2" ? "company-level feedback" : (v.pv ? "present value item" : v.total ? "portfolio total reported" : "policy-level") })
+      el("span", { class: "chip " + (v.cls === "C2" ? "plan" : "nb"), text: v.cls === "C2" ? "company-level feedback" : (/sum_lives/.test(v.formula) ? "policy-level (sum over lives)" : v.pv ? "present value item" : v.total ? "portfolio total reported" : "per life / policy") })
     ]));
     if (v.doc) box.appendChild(el("p", { class: "doc", text: v.doc }));
     box.appendChild(formulaNode(v.formula));
@@ -687,6 +774,7 @@ python examples/run_lifelib_cashvalue.py --extra-scenarios 100</pre>
   }
   document.getElementById("ex-m-bt").addEventListener("click", function () { setModel("bt"); });
   document.getElementById("ex-m-cv").addEventListener("click", function () { setModel("cv"); });
+  document.getElementById("ex-m-fu").addEventListener("click", function () { setModel("fu"); });
   document.getElementById("ex-policy").addEventListener("change", function (e) { S.sample = +e.target.value; render(); });
   document.getElementById("ex-t").addEventListener("input", function (e) { S.t = +e.target.value; render(); });
   document.getElementById("ex-t-num").addEventListener("change", function (e) { S.t = +e.target.value || 0; render(); });
@@ -699,6 +787,7 @@ python examples/run_lifelib_cashvalue.py --extra-scenarios 100</pre>
     ["Run numbers and sensitivities", "A run takes its own set of tables; swap a table to run a sensitivity", "available"],
     ["Accumulations and SPCODE totals", "Portfolio totals by month and per-policy sums over time; grouping by any attribute", "partly"],
     ["Diagram View", "Explain any number: formula plus every input value at that month, click to follow (above)", "available"],
+    ["Array variables (lives in a policy)", "Model(lives=8): each life is a lane, a policy's lives form one group, sum_lives gives policy totals; stays on the fast per-chunk path", "available"],
     ["Stochastic runs", "Scenarios are lanes: all scenarios run in one pass, with identical results whether run together or one at a time", "available"],
     ["ALS dynamic loop", "Company-level feedback (sum_policies) runs in lockstep and synchronises only where a total needs every policy", "available"],
     ["Nested structures", "Inner runs from projected states, for future reserves and projected capital", "planned"],
@@ -709,7 +798,7 @@ python examples/run_lifelib_cashvalue.py --extra-scenarios 100</pre>
     return [r[0], r[1], el("span", { class: "chip " + (r[2] === "available" ? "ok" : r[2] === "partly" ? "nb" : "plan"), text: r[2] })];
   }));
 
-  function drawAll() { drawBT(); scenChart(); capChart(); speedChart(); render(); }
+  function drawAll() { drawBT(); scenChart(); capChart(); fuChart(); speedChart(); render(); }
   setModel("bt");
   drawAll();
   if (window.matchMedia) {
