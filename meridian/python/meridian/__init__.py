@@ -17,10 +17,11 @@ from .dsl import (
     where,
 )
 from .runner import Results, Trace, inspect, run, trace
+from .tables import Table, category_code
 
 __all__ = [
     "Model", "Results", "Trace",
     "t", "where", "minimum", "maximum", "clip", "floor", "exp", "log", "sqrt", "sum_policies",
-    "run", "inspect", "trace",
+    "run", "inspect", "trace", "Table", "category_code",
 ]
 __version__ = "0.1.0"

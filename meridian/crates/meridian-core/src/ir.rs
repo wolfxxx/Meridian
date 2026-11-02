@@ -106,10 +106,11 @@ pub enum Node {
         #[serde(default)]
         lag: usize,
     },
-    /// 1-D table lookup: `table[floor(index)]`, clamped to the table's bounds (NaN -> 0).
+    /// Table lookup with one key expression per table dimension (see `table::TableDim` for
+    /// range and category semantics).
     Table {
         name: String,
-        index: usize,
+        indices: Vec<usize>,
     },
     /// A scenario path value for the lane's scenario at time `t`.
     Scenario {
@@ -146,7 +147,7 @@ impl Node {
             | Node::Time
             | Node::Var { .. }
             | Node::Scenario { .. } => vec![],
-            Node::Table { index, .. } => vec![*index],
+            Node::Table { indices, .. } => indices.clone(),
             Node::Unary { a, .. } | Node::SumPolicies { a } => vec![*a],
             Node::Binary { a, b, .. } => vec![*a, *b],
             Node::Select { cond, a, b } => vec![*cond, *a, *b],

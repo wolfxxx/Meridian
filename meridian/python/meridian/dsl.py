@@ -25,6 +25,8 @@ import json
 from dataclasses import dataclass, field
 from typing import Callable, Union
 
+from .tables import category_code
+
 Number = Union[int, float]
 
 
@@ -86,6 +88,8 @@ def as_expr(x) -> Expr:
         return Const(1.0 if x else 0.0)
     if isinstance(x, (int, float)):
         return Const(float(x))
+    if isinstance(x, str):
+        return Category(x)
     raise TypeError(f"cannot use {type(x).__name__} in a model expression")
 
 
@@ -102,6 +106,17 @@ class Const(Expr):
 
     def formula(self):
         return _fmt_num(self.value)
+
+
+class Category(Const):
+    """A text label in a formula (e.g. ``mp.sex == "F"``); compiled to its category code."""
+
+    def __init__(self, label: str):
+        super().__init__(category_code(label))
+        self.label = label
+
+    def formula(self):
+        return repr(self.label)
 
 
 class _Time(Expr):
@@ -146,18 +161,18 @@ class VarRef(Expr):
 
 
 class TableLookup(Expr):
-    def __init__(self, name: str, index: Expr):
+    def __init__(self, name: str, keys: tuple[Expr, ...]):
         self.name = name
-        self.index = index
+        self.keys = keys
 
     def children(self):
-        return (self.index,)
+        return self.keys
 
     def _emit(self, emit):
-        return {"op": "table", "name": self.name, "index": emit(self.index)}
+        return {"op": "table", "name": self.name, "indices": [emit(k) for k in self.keys]}
 
     def formula(self):
-        return f"{self.name}[{self.index.formula()}]"
+        return f"{self.name}[{', '.join(k.formula() for k in self.keys)}]"
 
 
 class ScenarioRef(Expr):
@@ -305,8 +320,9 @@ class _Table:
     def __init__(self, name: str):
         self.name = name
 
-    def __getitem__(self, index) -> TableLookup:
-        return TableLookup(self.name, as_expr(index))
+    def __getitem__(self, key) -> TableLookup:
+        keys = key if isinstance(key, tuple) else (key,)
+        return TableLookup(self.name, tuple(as_expr(k) for k in keys))
 
 
 class _TableNamespace:

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from .tables import as_table
+
 _UNARY = {
     "neg": np.negative,
     "abs": np.abs,
@@ -55,9 +57,10 @@ def _order(ir: dict) -> list[int]:
                     raise ValueError(f"unknown variable `{n['name']}`")
                 if n.get("lag", 0) == 0:
                     out.add(index[n["name"]])
-            for key in ("a", "b", "cond", "index"):
+            for key in ("a", "b", "cond"):
                 if key in n:
                     stack.append(n[key])
+            stack.extend(n.get("indices", []))
         return out
 
     dep = [deps(v["expr"]) for v in variables]
@@ -105,10 +108,8 @@ def run_reference(ir: dict, model_points: dict, tables: dict, scenarios: dict,
             lag = n.get("lag", 0)
             r = np.full(lanes, init[n["name"]]) if t < lag else hist[n["name"]][t - lag]
         elif op == "table":
-            tb = np.asarray(tables[n["name"]], dtype=float)
-            k = np.floor(evaluate(n["index"], t, cache))
-            k = np.where(np.isnan(k), 0.0, k)
-            r = tb[np.clip(k, 0, len(tb) - 1).astype(np.int64)]
+            tb = as_table(tables[n["name"]])
+            r = tb.lookup([evaluate(k, t, cache) for k in n["indices"]])
         elif op == "scenario":
             r = np.asarray(scenarios[n["name"]], dtype=float)[scen, t]
         elif op == "unary":

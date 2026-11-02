@@ -12,6 +12,28 @@ into an intermediate representation (IR) and executed by a vectorised Rust engin
 > This is a prototype. Its reference models illustrate the modelling style and are not
 > certified actuarial libraries.
 
+## Headline: lifelib's BasicTerm model, rebuilt and reconciled
+
+[lifelib](https://lifelib.io)'s `BasicTerm` model is an open-source, published term-assurance
+projection: 10,000 policies, monthly, select-and-ultimate mortality, a premium set from present
+values. It was rebuilt in Meridian and reconciled policy by policy against lifelib's own output
+(`examples/run_lifelib_basicterm.py`, `tests/test_lifelib_basicterm.py`):
+
+| Check | Result |
+|---|---|
+| Premium per policy | **10,000 / 10,000 identical to the cent** |
+| PV of premiums, claims, expenses, commissions per policy | worst relative difference ≤ 2e-15 |
+| PV of net cash flow per policy | worst relative difference 1.5e-12 (difference of large numbers) |
+| Portfolio PV of net cash flow | **14,489,630.534602 in both** |
+| Monthly portfolio cash flows (8 series × 241 months) | worst relative difference ≤ 6e-16 |
+| Speed, 10,000 policies (pricing + projection passes) | Meridian 0.03 s; lifelib's NumPy-vectorised `BasicTerm_M` 0.38 s |
+| Speed, 1,000,000 policies | Meridian 1.6 s (about 300m policy-months/s) |
+
+lifelib's data is redistributed under its MIT licence: see
+`python/meridian/models/data/lifelib_basicterm/NOTICE.md`. The reference results come from
+`tools/make_lifelib_reference.py`, which runs lifelib itself. It also checks that lifelib's
+seriatim `BasicTerm_S` and vectorised `BasicTerm_M` agree, to 4e-14.
+
 ## Layout
 
 ```
@@ -24,8 +46,10 @@ meridian/
 │  ├─ dsl.py                     the modelling language (traced Python expressions)
 │  ├─ reference.py               independent pure-NumPy implementation (reconciliation baseline)
 │  ├─ runner.py                  run(), inspect(), trace() (single-policy explain)
-│  └─ models/                    reference models: term_life (C1), with_profits (C2, stochastic)
-├─ tests/test_engine.py          Rust-vs-NumPy reconciliation and behaviour tests
+│  ├─ tables.py                  multi-dimensional range/category tables, text categories
+│  └─ models/                    term_life (C1), with_profits (C2, stochastic), lifelib_basicterm
+├─ tests/                        reconciliation and behaviour tests (Rust vs NumPy vs lifelib)
+├─ tools/make_lifelib_reference.py  regenerates lifelib's reference results (separate venv)
 └─ examples/                     demos and benchmark
 ```
 
@@ -43,6 +67,7 @@ $env:VIRTUAL_ENV = (Resolve-Path .venv).Path
 cargo test -p meridian-core                            # Rust tests
 .\.venv\Scripts\python -m pytest -q                     # Python reconciliation tests
 
+.\.venv\Scripts\python examples\run_lifelib_basicterm.py  # lifelib reconciliation showcase
 .\.venv\Scripts\python examples\run_term_life.py       # C1 demo + trace/explain
 .\.venv\Scripts\python examples\run_with_profits.py    # C2 stochastic demo (CTE70)
 .\.venv\Scripts\python examples\bench.py               # NumPy vs Rust throughput
@@ -79,6 +104,10 @@ Language rules:
 - **Referencing variables.** Refer to variables through `v.<name>`, so definition order doesn't matter. `.lag(k)` gives the value `k` steps earlier, and the variable's `init` is used before the projection starts.
 - **Ordering and cycles.** The engine orders evaluation within a time step itself. A same-step loop is reported with its path, e.g. `a -> b -> a`.
 - **Cross-policy aggregates.** `sum_policies(x)` makes a model C2: it sums `x` over all policies of the same scenario at the current step.
+- **Tables.** `tb.name[k1, k2, ...]` takes one key per dimension of a `mr.Table`:
+  - **Integer-range dimensions** (e.g. `Table(q, dims=[18, 0])` for ages from 18 × durations from 0) floor and clamp the key.
+  - **Category dimensions** (e.g. `dims=[["M", "F"], ["NS", "S"]]`) must match a label exactly. An unknown label gives NaN rather than a silent wrong value.
+- **Text.** Model-point columns may be text, e.g. `sex = "F"`, and formulas can compare them: `where(mp.sex == "F", ...)`. Labels become deterministic numeric codes, so no list has to be declared.
 
 ## What the prototype demonstrates (spec mapping)
 
@@ -88,7 +117,8 @@ Language rules:
 | §19.4 C1/C2 classes, per-step barrier for `sum_policies` | `compile.rs` class analysis; `with_profits` model; `test_dependency_classes` |
 | L-11/NF-12/NF-13: deterministic, bit-identical results regardless of strategy, chunk size or threads | fixed-block pairwise summation in `sum.rs`; per-chunk vs lockstep equality tests in `engine.rs` and `test_engine.py` |
 | §19.4 execution strategies: C1 per-chunk with no barriers; C2 partitioned by scenario, each a segmented lockstep with barriers only where a total needs them | `engine.rs` `run_per_chunk` / `run_by_scenario` / `run_lockstep`; `compile.rs` `build_segments`; `inspect(model)["segments"]` |
-| §31.1: independent implementation for reconciliation | `reference.py`; Rust-vs-NumPy tests at 1e-11 relative |
+| §31.1: independent implementation for reconciliation | `reference.py` (Rust vs NumPy, 1e-11 relative); **external: lifelib BasicTerm**, with every premium identical and PVs within 2e-15 |
+| Tables and categories (the successor to Prophet's generic and parameter tables) | `tables.py`, `table.rs`; `tests/test_tables.py` |
 | DX-3: single-policy trace and "explain this number" | `runner.trace()`, `Trace.explain()` |
 | MS-12: assumption sets as data | `assumptions` and `wp_params` tables (swap them to run a sensitivity) |
 
@@ -146,10 +176,8 @@ These numbers were measured with other applications using about a third of the C
 1. **Cache footprint of large scenarios.** Done so far for C2: segmented lockstep, block-wise reductions and scenario partitioning. Each scenario group still holds every variable's buffers for all of its policies, about 4 MB for 20k policies. With 28 threads that exceeds this CPU's 33 MB shared L3, so large C2 runs remain partly memory-bound. Operator fusion (next item) shrinks the number of buffers. Holding state at narrower precision for non-governed exploratory runs is another option.
 2. **Operator fusion / code generation.** The interpreter materialises every intermediate node into a buffer. The next step is to fuse expression trees into single loops, then generate code with Cranelift or LLVM (spec §25.1).
 3. **Shared subexpressions are recomputed in the engine.** The Python tracer de-duplicates them in the IR, but the engine re-evaluates shared nodes. Add per-chunk memoisation.
-4. **Missing language features:**
-   - multi-dimensional and generic tables (2–10 keys)
+4. **Missing language features** (done: multi-dimensional range/category tables and text categories):
    - arrays with named axes
-   - text and enum types
    - procedural blocks
    - multiple time granularities
    - nested (C3) runs

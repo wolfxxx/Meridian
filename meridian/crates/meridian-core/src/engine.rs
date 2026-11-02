@@ -29,6 +29,7 @@ use crate::compile::{CompiledModel, RNode};
 use crate::error::{MeridianError, Result};
 use crate::ir::{BinaryOp, UnaryOp};
 use crate::sum::{blocked_sum, pairwise_sum, REDUCTION_BLOCK};
+use crate::table::TableData;
 
 /// Run inputs. All arrays are float64.
 #[derive(Debug, Clone, Default)]
@@ -38,8 +39,8 @@ pub struct Inputs {
     pub n_scenarios: usize,
     /// Model-point columns, each of length `n_policies`.
     pub model_points: HashMap<String, Vec<f64>>,
-    /// 1-D tables.
-    pub tables: HashMap<String, Vec<f64>>,
+    /// Assumption tables (1-D vectors or multi-dimensional range/category tables).
+    pub tables: HashMap<String, TableData>,
     /// Scenario paths, each of length `n_scenarios * n_steps` (row-major `[scenario][t]`).
     pub scenarios: HashMap<String, Vec<f64>>,
 }
@@ -92,7 +93,7 @@ pub struct Results {
 
 struct Data<'a> {
     mp: Vec<&'a [f64]>,
-    tables: Vec<&'a [f64]>,
+    tables: Vec<&'a TableData>,
     scen: Vec<&'a [f64]>,
     n_pol: usize,
     n_scen: usize,
@@ -585,10 +586,21 @@ impl CompiledModel {
                 .tables
                 .get(name)
                 .ok_or_else(|| MeridianError::MissingInput(format!("table `{name}`")))?;
-            if tb.is_empty() {
-                return Err(MeridianError::Shape(format!("table `{name}` is empty")));
+            tables.push(tb);
+        }
+        // Every lookup must supply one key per table dimension.
+        for node in &self.nodes {
+            if let RNode::Table { table, indices } = node {
+                let td = tables[*table];
+                if td.ndim() != indices.len() {
+                    return Err(MeridianError::Shape(format!(
+                        "table `{}` has {} dimension(s) but is looked up with {} key(s)",
+                        self.table_names[*table],
+                        td.ndim(),
+                        indices.len()
+                    )));
+                }
             }
-            tables.push(tb.as_slice());
         }
         let mut scen = Vec::new();
         for name in &self.scenario_names {
@@ -656,20 +668,30 @@ impl CompiledModel {
                     out.copy_from_slice(&src[off..off + n]);
                 }
             }
-            RNode::Table { table, index } => {
-                self.eval_chunk(*index, ctx, lo, out);
-                let tb = ctx.data.tables[*table];
-                let last = (tb.len() - 1) as f64;
+            RNode::Table { table, indices } => {
+                let td = ctx.data.tables[*table];
+                // Accumulate the flat row-major offset per lane in `out` (NaN = unknown
+                // category), then replace it with the looked-up value.
+                out.fill(0.0);
+                let mut key = take_buf(n);
+                for (d, &k) in indices.iter().enumerate() {
+                    self.eval_chunk(k, ctx, lo, &mut key);
+                    let dim = &td.dims[d];
+                    let stride = td.stride(d) as f64;
+                    for (o, x) in out.iter_mut().zip(key.iter()) {
+                        *o = match dim.position(*x) {
+                            Some(p) => *o + p as f64 * stride,
+                            None => f64::NAN,
+                        };
+                    }
+                }
+                give_buf(key);
                 for o in out.iter_mut() {
-                    let k = o.floor();
-                    let k = if k.is_nan() || k < 0.0 {
-                        0.0
-                    } else if k > last {
-                        last
+                    *o = if o.is_nan() {
+                        f64::NAN
                     } else {
-                        k
+                        td.values[*o as usize]
                     };
-                    *o = tb[k as usize];
                 }
             }
             RNode::Scenario(k) => {

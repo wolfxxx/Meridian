@@ -5,7 +5,9 @@
 
 use std::collections::HashMap;
 
-use meridian_core::{compile, Inputs, MeridianError, ModelIr, RunOptions, Strategy};
+use meridian_core::{
+    compile, Inputs, MeridianError, ModelIr, RunOptions, Strategy, TableData, TableDim,
+};
 use numpy::{PyArray1, PyReadonlyArray1, PyReadonlyArray2, PyUntypedArrayMethods};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -61,7 +63,7 @@ fn inspect<'py>(py: Python<'py>, ir_json: &str) -> PyResult<Bound<'py, PyDict>> 
 /// `strategy="auto"` runs C1 models per chunk and C2 models in lockstep; `"lockstep"` forces
 /// lockstep. Results are bit-identical either way.
 #[pyfunction]
-#[pyo3(signature = (ir_json, model_points, tables, scenarios, n_policies, n_scenarios=1, keep_history=false, chunk_size=2048, strategy="auto"))]
+#[pyo3(signature = (ir_json, model_points, tables, scenarios, n_policies, n_scenarios=1, keep_history=false, chunk_size=2048, strategy="auto", table_dims=None))]
 #[allow(clippy::too_many_arguments)]
 fn run<'py>(
     py: Python<'py>,
@@ -74,6 +76,7 @@ fn run<'py>(
     keep_history: bool,
     chunk_size: usize,
     strategy: &str,
+    table_dims: Option<HashMap<String, Vec<(f64, usize, Vec<f64>)>>>,
 ) -> PyResult<Bound<'py, PyDict>> {
     let strategy = match strategy {
         "auto" => Strategy::Auto,
@@ -90,10 +93,35 @@ fn run<'py>(
         .into_iter()
         .map(|(k, v)| (k, v.as_array().to_vec()))
         .collect();
-    let tables = tables
-        .into_iter()
-        .map(|(k, v)| (k, v.as_array().to_vec()))
-        .collect();
+    // Tables arrive as flat row-major values plus, optionally, their dimensions: one
+    // `(start, len, category_codes)` per dimension (empty codes = integer range).
+    let table_dims = table_dims.unwrap_or_default();
+    let mut table_data = HashMap::new();
+    for (k, v) in tables {
+        let values = v.as_array().to_vec();
+        let td = match table_dims.get(&k) {
+            None => TableData::vector(values),
+            Some(dims) => {
+                let dims = dims
+                    .iter()
+                    .map(|(start, len, codes)| {
+                        if codes.is_empty() {
+                            TableDim::Range {
+                                start: *start,
+                                len: *len,
+                            }
+                        } else {
+                            TableDim::Categories(codes.clone())
+                        }
+                    })
+                    .collect();
+                TableData::new(values, dims)
+                    .map_err(|e| PyValueError::new_err(format!("table `{k}`: {e}")))?
+            }
+        };
+        table_data.insert(k, td);
+    }
+    let tables = table_data;
     let mut scen = HashMap::new();
     for (k, v) in scenarios {
         let shape = v.shape();

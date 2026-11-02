@@ -46,5 +46,8 @@ jobs:
       - name: Python tests (Rust vs NumPy reconciliation, strategy equivalence)
         run: python -m pytest -q
 
+      - name: lifelib reconciliation showcase
+        run: python examples/run_lifelib_basicterm.py --scale 5
+
       - name: Smoke benchmark
         run: python examples/bench.py --policies 20000 --years 20

@@ -30,7 +30,7 @@ pub(crate) enum RNode {
     Input(usize),
     Time,
     Var { var: usize, lag: usize },
-    Table { table: usize, index: usize },
+    Table { table: usize, indices: Vec<usize> },
     Scenario(usize),
     Unary(UnaryOp, usize),
     Binary(BinaryOp, usize, usize),
@@ -192,10 +192,17 @@ pub fn compile(ir: ModelIr) -> Result<CompiledModel> {
                     })?;
                 RNode::Var { var, lag: *lag }
             }
-            Node::Table { name, index } => RNode::Table {
-                table: slot(&mut tables, name),
-                index: *index,
-            },
+            Node::Table { name, indices } => {
+                if indices.is_empty() {
+                    return Err(MeridianError::InvalidIr(format!(
+                        "lookup of table `{name}` (node {i}) has no key expressions"
+                    )));
+                }
+                RNode::Table {
+                    table: slot(&mut tables, name),
+                    indices: indices.clone(),
+                }
+            }
             Node::Scenario { name } => RNode::Scenario(slot(&mut scenarios, name)),
             Node::Unary { func, a } => RNode::Unary(*func, *a),
             Node::Binary { func, a, b } => RNode::Binary(*func, *a, *b),
@@ -278,7 +285,7 @@ pub fn compile(ir: ModelIr) -> Result<CompiledModel> {
                 RNode::Const(_) | RNode::Time => true,
                 RNode::Input(_) | RNode::Scenario(_) | RNode::SumPolicies(_) => false,
                 RNode::Var { var, .. } => var_uniform[*var],
-                RNode::Table { index, .. } => uniform[*index],
+                RNode::Table { indices, .. } => indices.iter().all(|&k| uniform[k]),
                 RNode::Unary(_, a) => uniform[*a],
                 RNode::Binary(_, a, b) => uniform[*a] && uniform[*b],
                 RNode::Select(c, a, b) => uniform[*c] && uniform[*a] && uniform[*b],
@@ -338,7 +345,7 @@ fn lag0_refs(nodes: &[RNode], root: usize) -> BTreeSet<usize> {
             | RNode::Input(_)
             | RNode::Time
             | RNode::Scenario(_) => {}
-            RNode::Table { index, .. } => stack.push(*index),
+            RNode::Table { indices, .. } => stack.extend(indices.iter().copied()),
             RNode::Unary(_, a) | RNode::SumPolicies(a) => stack.push(*a),
             RNode::Binary(_, a, b) => stack.extend([*a, *b]),
             RNode::Select(c, a, b) => stack.extend([*c, *a, *b]),
@@ -413,7 +420,11 @@ fn walk(
             f.agg_nodes.insert(i);
             walk(nodes, *a, true, f, seen, var_name)?;
         }
-        RNode::Table { index, .. } => walk(nodes, *index, inside_agg, f, seen, var_name)?,
+        RNode::Table { indices, .. } => {
+            for &k in indices {
+                walk(nodes, k, inside_agg, f, seen, var_name)?;
+            }
+        }
         RNode::Unary(_, a) => walk(nodes, *a, inside_agg, f, seen, var_name)?,
         RNode::Binary(_, a, b) => {
             walk(nodes, *a, inside_agg, f, seen, var_name)?;

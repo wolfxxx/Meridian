@@ -9,6 +9,7 @@ import numpy as np
 
 from .dsl import Model, references
 from .reference import run_reference
+from .tables import Table, as_table, encode_column
 
 try:
     from . import _engine  # the compiled Rust extension
@@ -41,12 +42,12 @@ class Results:
 def _prepare(model: Model, model_points: dict, tables: dict | None, scenarios: dict | None):
     if not model_points:
         raise ValueError("model_points must contain at least one column")
-    mp = {k: np.ascontiguousarray(v, dtype=np.float64) for k, v in model_points.items()}
+    mp = {k: encode_column(v) for k, v in model_points.items()}
     lengths = {k: a.shape for k, a in mp.items()}
     n_pol = next(iter(mp.values())).shape[0]
     if any(a.ndim != 1 or a.shape[0] != n_pol for a in mp.values()):
         raise ValueError(f"model-point columns must be 1-D and equal length, got {lengths}")
-    tb = {k: np.ascontiguousarray(v, dtype=np.float64) for k, v in (tables or {}).items()}
+    tb = {k: as_table(v) for k, v in (tables or {}).items()}
     sc = {k: np.ascontiguousarray(v, dtype=np.float64) for k, v in (scenarios or {}).items()}
     n_scen = 1
     if sc:
@@ -74,7 +75,9 @@ def run(model: Model, model_points: dict, tables: dict | None = None,
     if engine == "rust":
         if _engine is None:
             raise RuntimeError("Rust extension not built: run `maturin develop --release` in meridian/")
-        raw = _engine.run(ir_json, mp, tb, sc, n_pol, n_scen, keep_history, chunk_size, strategy)
+        raw = _engine.run(ir_json, mp, {k: v.flat_values() for k, v in tb.items()}, sc, n_pol,
+                          n_scen, keep_history, chunk_size, strategy,
+                          table_dims={k: v.engine_dims() for k, v in tb.items()})
         seconds = time.perf_counter() - start
         steps = model.n_steps
         totals = {k: v.reshape(n_scen, steps) for k, v in raw["totals"].items()}
@@ -134,7 +137,9 @@ class Trace:
             label = f"{ref}[t-{lag}]" if lag else ref
             lines.append(f"  {label:<24} = {val:.10g}" + ("   (init)" if s < 0 else ""))
         for inp in sorted(inputs):
-            lines.append(f"  mp.{inp:<21} = {self.inputs[inp]:.10g}")
+            val = self.inputs[inp]
+            shown = repr(val) if isinstance(val, str) else f"{val:.10g}"
+            lines.append(f"  mp.{inp:<21} = {shown}")
         return "\n".join(lines)
 
 
@@ -147,7 +152,8 @@ def trace(model: Model, model_points: dict, tables: dict | None = None,
     """
     info = inspect(model)
     is_c2 = any(c == "C2" for c in info["classes"].values())
-    mp_all = {k: np.asarray(v, dtype=np.float64) for k, v in model_points.items()}
+    mp_all = {k: encode_column(v) for k, v in model_points.items()}
+    text_inputs = {k: v for k, v in model_points.items() if np.asarray(v).dtype.kind in ("U", "S", "O")}
     if is_c2:
         res = run(model, mp_all, tables, scenarios, keep_history=True)
         values = {k: v[:, scenario, policy].copy() for k, v in res.history.items()}
@@ -156,4 +162,6 @@ def trace(model: Model, model_points: dict, tables: dict | None = None,
         sc_one = {k: np.asarray(v)[scenario:scenario + 1] for k, v in (scenarios or {}).items()}
         res = run(model, mp_one, tables, sc_one, keep_history=True)
         values = {k: v[:, 0, 0].copy() for k, v in res.history.items()}
-    return Trace(model, policy, scenario, values, {k: float(v[policy]) for k, v in mp_all.items()})
+    inputs = {k: (str(np.asarray(text_inputs[k])[policy]) if k in text_inputs else float(v[policy]))
+              for k, v in mp_all.items()}
+    return Trace(model, policy, scenario, values, inputs)

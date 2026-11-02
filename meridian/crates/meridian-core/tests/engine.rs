@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use meridian_core::{compile, Inputs, MeridianError, ModelIr, RunOptions, Strategy, VarClass};
+use meridian_core::{
+    compile, Inputs, MeridianError, ModelIr, RunOptions, Strategy, TableData, TableDim, VarClass,
+};
 use serde_json::json;
 
 fn ir(v: serde_json::Value) -> ModelIr {
@@ -304,7 +306,7 @@ fn table_lookup_floors_and_clamps() {
         "name": "tbl", "n_steps": 1,
         "nodes": [
             {"op": "input", "name": "k"},
-            {"op": "table", "name": "t", "index": 0}
+            {"op": "table", "name": "t", "indices": [0]}
         ],
         "variables": [{"name": "v", "expr": 1}],
         "outputs": {"policy_sums": ["v"]}
@@ -313,7 +315,7 @@ fn table_lookup_floors_and_clamps() {
     let mut mp = HashMap::new();
     mp.insert("k".into(), vec![-3.0, 0.0, 1.9, 2.0, 99.0, f64::NAN]);
     let mut tb = HashMap::new();
-    tb.insert("t".into(), vec![10.0, 11.0, 12.0]);
+    tb.insert("t".into(), TableData::vector(vec![10.0, 11.0, 12.0]));
     let inputs = Inputs {
         n_policies: 6,
         n_scenarios: 1,
@@ -462,4 +464,86 @@ fn scenario_partitioning_matches_global_lockstep() {
         assert_eq!(a.policy_sums, b.policy_sums, "n_scen={n_scen}");
         assert_eq!(a.history, b.history, "n_scen={n_scen}");
     }
+}
+
+/// 2-D select-and-ultimate style table (age x duration) and a category-keyed table.
+#[test]
+fn multi_dimensional_and_category_tables() {
+    let m = ir(json!({
+        "name": "tbl2", "n_steps": 1,
+        "nodes": [
+            {"op": "input", "name": "age"},                         // 0
+            {"op": "input", "name": "dur"},                         // 1
+            {"op": "table", "name": "q", "indices": [0, 1]},        // 2
+            {"op": "input", "name": "product"},                     // 3
+            {"op": "table", "name": "lapse", "indices": [3]}        // 4
+        ],
+        "variables": [{"name": "qx", "expr": 2}, {"name": "w", "expr": 4}],
+        "outputs": {"policy_sums": ["qx", "w"]}
+    }));
+    let model = compile(m).unwrap();
+    // q: ages 18..20 (3 rows) x durations 0..1 (2 cols), value = age*10 + dur
+    let q = TableData::new(
+        vec![180.0, 181.0, 190.0, 191.0, 200.0, 201.0],
+        vec![
+            TableDim::Range {
+                start: 18.0,
+                len: 3,
+            },
+            TableDim::Range { start: 0.0, len: 2 },
+        ],
+    )
+    .unwrap();
+    // lapse by product code (-1 = "A", -2 = "B")
+    let lapse =
+        TableData::new(vec![0.1, 0.2], vec![TableDim::Categories(vec![-1.0, -2.0])]).unwrap();
+    let mut mp = HashMap::new();
+    mp.insert("age".into(), vec![18.0, 19.5, 25.0, 17.0]);
+    mp.insert("dur".into(), vec![0.0, 1.0, 7.0, 0.0]);
+    mp.insert("product".into(), vec![-1.0, -2.0, -2.0, -3.0]);
+    let mut tables = HashMap::new();
+    tables.insert("q".into(), q);
+    tables.insert("lapse".into(), lapse);
+    let inputs = Inputs {
+        n_policies: 4,
+        n_scenarios: 1,
+        model_points: mp,
+        tables,
+        ..Default::default()
+    };
+    let r = model.run(&inputs, &RunOptions::default()).unwrap();
+    assert_eq!(r.policy_sums[0].1, vec![180.0, 191.0, 201.0, 180.0]); // clamped age/dur
+    let w = &r.policy_sums[1].1;
+    assert_eq!(&w[..3], &[0.1, 0.2, 0.2]);
+    assert!(w[3].is_nan(), "unknown category must give NaN");
+}
+
+#[test]
+fn table_key_count_must_match_dimensions() {
+    let m = ir(json!({
+        "name": "bad", "n_steps": 1,
+        "nodes": [{"op": "input", "name": "a"}, {"op": "table", "name": "q", "indices": [0]}],
+        "variables": [{"name": "v", "expr": 1}]
+    }));
+    let model = compile(m).unwrap();
+    let q = TableData::new(
+        vec![1.0; 4],
+        vec![TableDim::Range { start: 0.0, len: 2 }; 2],
+    )
+    .unwrap();
+    let mut mp = HashMap::new();
+    mp.insert("a".into(), vec![0.0]);
+    let mut tables = HashMap::new();
+    tables.insert("q".into(), q);
+    let inputs = Inputs {
+        n_policies: 1,
+        n_scenarios: 1,
+        model_points: mp,
+        tables,
+        ..Default::default()
+    };
+    assert!(matches!(
+        model.run(&inputs, &RunOptions::default()),
+        Err(MeridianError::Shape(_))
+    ));
 }

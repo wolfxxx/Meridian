@@ -1246,6 +1246,10 @@ Services & IDE  Control-plane services, language server (LSP),          (Rust; T
   - 20k × 200 × 240 (960m lane-months): **6–7.5 s**, against 12.1 s for global lockstep and 26.8 s for the first prototype.
   - Results are unchanged throughout: PV of guarantees mean 34,087,164 and CTE70 71,043,727 in every version.
   - The remaining limit for large scenarios is cache footprint (about 4 MB of state per 20k-policy scenario × 28 threads exceeds L3). Operator fusion (item 4) reduces it.
+- **External reconciliation (lifelib BasicTerm, MIT-licensed, 10,000 policies):** lifelib's term-assurance model was rebuilt in the Python modelling language using the new multi-dimensional select-and-ultimate tables and text categories.
+  - Every premium is identical to the cent, and per-policy PVs agree within 2e-15 relative.
+  - The portfolio PV of net cash flow is identical (14,489,630.534602).
+  - Meridian runs both passes in 0.03 s, against 0.38 s for lifelib's NumPy-vectorised model, and 1m policies in 1.6 s.
 - **These are prototype numbers, not the §30.2 GA targets.**
 
 ---

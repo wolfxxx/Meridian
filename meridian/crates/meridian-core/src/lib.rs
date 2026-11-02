@@ -24,8 +24,10 @@ pub mod engine;
 mod error;
 pub mod ir;
 pub mod sum;
+pub mod table;
 
 pub use compile::{compile, CompiledModel, Segment, VarClass};
 pub use engine::{Inputs, Results, RunOptions, Strategy};
 pub use error::{MeridianError, Result};
 pub use ir::{BinaryOp, ModelIr, Node, Outputs, UnaryOp, VarDef};
+pub use table::{TableData, TableDim};

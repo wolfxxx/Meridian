@@ -1,0 +1,11 @@
+{
+  "lifelib_version": "0.17.2",
+  "modelx_version": "0.33.0",
+  "n_policies": 10000,
+  "n_steps": 241,
+  "basicterm_m_seconds_all_policies": 0.375,
+  "basicterm_s_seconds_for_sample": 0.15,
+  "basicterm_s_sample_size": 9,
+  "s_vs_m_worst_relative_diff": 3.719074877241573e-14,
+  "portfolio_pv_net_cf": 14489630.534601538
+}
